@@ -129,7 +129,11 @@ function errorCodeOf(response: TlsResponse): string | undefined {
 }
 
 function throwForStatus(response: TlsResponse): void {
-  const kind: AuthFailureKind = failureForStatus(response.status, errorCodeOf(response));
+  const code: string | undefined = errorCodeOf(response);
+  const kind: AuthFailureKind = failureForStatus(response.status, code);
+  // The gateway's error code is what separates "revoked" from "expired" from "over quota"; log it
+  // before collapsing the response into a user-facing category.
+  Log.warn(`gateway answered HTTP ${response.status} (${code === undefined ? 'no error code' : code})`);
   throw new AuthFailure(kind, `gateway answered HTTP ${response.status}`);
 }
 

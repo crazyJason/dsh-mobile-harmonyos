@@ -228,8 +228,11 @@ struct Index {
   }
 
   private openDevice(record: DeviceRecord): void {
-    if (record.status === DeviceStatus.REVOKED || record.deviceToken.length === 0) {
-      this.toast('这条记录已失效，请删除后重新配对');
+    if (record.status === DeviceStatus.REVOKED || record.status === DeviceStatus.EXPIRED
+      || record.deviceToken.length === 0) {
+      // dsh-mobile deletes a revoked device, so the last probe reports EXPIRED rather than REVOKED;
+      // both mean this credential no longer works and both need a fresh pairing.
+      this.toast('这台电脑已不再信任本设备，请删除记录后重新配对');
       return;
     }
     this.activeDevice = record;

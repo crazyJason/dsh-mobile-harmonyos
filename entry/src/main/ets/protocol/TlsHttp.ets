@@ -229,7 +229,11 @@ function transportFailure(cause: string): AuthFailure {
 /** Handshake rejections are TLS failures; everything else is a network failure. */
 function classifySocketError(error: BusinessError): AuthFailure {
   const code: number = error.code;
-  if (code === 2303501 || code === 2303502 || code === 2303503 || code === 2303505) {
+  // 2303504 is the X.509 verification failure and 2303505 a TLS system-call (handshake) failure.
+  // 2303501/02/03 mean the SSL object or stream was unusable — on a closed port HarmonyOS reports
+  // 2303501 ("SSL is null"), which is a reachability problem and must not be shown as a certificate
+  // mismatch (verified against a stopped gateway on a Mate 60 Pro+).
+  if (code === 2303504 || code === 2303505) {
     return new AuthFailure(AuthFailureKind.TLS, 'gateway TLS failure');
   }
   if (code === 2303210) {

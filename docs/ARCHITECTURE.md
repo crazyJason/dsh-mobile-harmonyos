@@ -2,7 +2,7 @@
 
 本文说明 `dsh-mobile-harmonyos` 的分层、模块职责、关键数据流、证书固定设计，以及每个模块在上游 Android 客户端中的对应物。
 
-> **状态**：以下描述对应本仓库当前代码。应用已在本机编译为 HAP，但**没有真机运行证据**；涉及运行时行为的判断（线程调度、ArkWeb 行为、跨应用生命周期）属于设计预期，需按 [TESTING.md](TESTING.md) 在真机验证。
+> **状态**：以下描述对应本仓库当前代码。应用已在本机编译为 HAP，并于 2026-11-24 在真机跑通局域网主流程（签名安装、启动、协议自检、配对、ArkWeb 浏览、重启恢复，见 [TESTING.md §11](TESTING.md#11-执行记录2026-11-24-第一轮)）。**线程调度、ArkWeb 负向路径、网络切换、远程入口**等运行时判断仍属设计预期，需按 TESTING.md 继续验证。
 
 - [1. 设计目标与约束](#1-设计目标与约束)
 - [2. 总体结构](#2-总体结构)
@@ -407,7 +407,7 @@ ArkWeb 对自签证书会触发 `onSslErrorEvent`。本项目不盲目 `handleCo
 | 缺口 | 影响 | 方向 |
 | --- | --- | --- |
 | 远程/局域网模式判定比上游简单 | 以 `isPrivateNetworkHost` 判定：私有 IPv4、CGNAT `100.64/10`、`localhost` 为 LAN，其余主机名/公网地址为 REMOTE；不识别 cpolar/cloudflared/ts.net 等隧道厂商后缀。影响仅限超时档位、列表标签与“私网必须供 CA”的判定；证书/凭据校验本身不变 | 可选：复刻上游 `RemoteHostPolicy` 的细分规则 |
-| 协议层中 `preserveRemotePin`、`fetchMetadata` 未接入主流程（`isPinnedAuthority` 已用于 SSL 续接与自检，`fetchServedCertificate` 已用于 TLS 诊断日志） | 远程降级保护、metadata 兼容性提示尚未使用 | 在配对/诊断流程中接入 |
+| 协议层中 `fetchMetadata` 未接入主流程（`preserveRemotePin` 已在配对流程接线，`isPinnedAuthority` 已用于 SSL 续接与自检，`fetchServedCertificate` 已用于 TLS 诊断日志） | metadata 兼容性提示尚未使用 | 在诊断流程中接入 |
 | 删除本地设备记录时未主动清除 ArkWeb 中已注入的会话 Cookie | 旧 Cookie 可能残留到会话过期（仍受 host-only/HTTPS/Strict 约束，且只属于同一台电脑） | 在删除/重新配对时用同名 Cookie 过期（`Max-Age=0`）清理 |
 | 无 `window.dshMobileNative` 原生桥 | 页面原生增强能力不可用 | 按上游 `NativeBridgePolicy` 定义消息白名单后再实现 |
 | 无推送 / 无 iroh / 无扫码 / 无原生文件选择器 | 见 [README 已知限制](../README.md#已知限制) | 后续版本 |

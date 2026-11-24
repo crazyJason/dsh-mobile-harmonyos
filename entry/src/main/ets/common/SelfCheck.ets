@@ -6,7 +6,7 @@
  * needing a reachable computer, which makes "it installs but misbehaves" diagnosable.
  */
 import { parseConnection, parseOrigin, isSameOrigin, isPinnedAuthority } from '../protocol/Origin';
-import { parsePairingKey, pairingKeyFromUrl } from '../protocol/PairingKey';
+import { parsePairingKey, pairingKeyFromUrl, preserveRemotePin } from '../protocol/PairingKey';
 import { parseAsn1Time } from '../protocol/CertPin';
 
 export class SelfCheckResult {
@@ -73,6 +73,20 @@ export function runSelfCheck(): SelfCheckResult {
   check('解析 GeneralizedTime 有效期', parseAsn1Time('20510101000000Z') === Date.UTC(2051, 0, 1, 0, 0, 0), result);
   check('拒绝非 ASN.1 时间', parseAsn1Time('2025-01-01T00:00:00Z') === undefined, result);
   check('拒绝越界月份', parseAsn1Time('251301000000Z') === undefined, result);
+
+  // Remote downgrade protection (PROTOCOL §3.3 rule 4): a stored CA outranks a key that does not
+  // require one, so a stripped dsh1 key cannot move an already pinned remote entry to the platform
+  // trust store.
+  const noCaKey = parsePairingKey(dsh1Key);
+  const caKey = parsePairingKey(dsh2Key);
+  check('远程已固定 CA 时拒绝降级',
+    noCaKey !== undefined && preserveRemotePin(true, noCaKey, true).requiresCa === true, result);
+  check('远程无已存 CA 时允许系统信任',
+    noCaKey !== undefined && preserveRemotePin(true, noCaKey, false).requiresCa === false, result);
+  check('局域网不启用远程降级保护',
+    noCaKey !== undefined && preserveRemotePin(false, noCaKey, true).requiresCa === false, result);
+  check('dsh2 密钥始终要求 CA',
+    caKey !== undefined && preserveRemotePin(true, caKey, false).requiresCa === true, result);
 
   return result;
 }

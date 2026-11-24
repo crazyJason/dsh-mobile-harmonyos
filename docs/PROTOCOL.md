@@ -181,9 +181,9 @@ dsh2 片段:     ^key=dsh2\.[a-f0-9]{64}\.[A-Za-z0-9_-]{43}$
 
 - **LAN 模式**：配对时必须先下载并校验 CA，再用该 CA 发起 `native-pair`；不能因为链接是 legacy 格式就跳过 CA。
 - **远程模式**：先尝试 `/ca.cer`。有 CA → 校验并固定；明确 404 → 仅当 `target.remote === true` 且密钥不要求 CA（公网证书入口）时使用系统信任库；其他错误（网络、TLS、5xx）应当**向上抛出**，不能当作 404 处理。私网入口即使密钥不要求 CA，404 也必须失败。
-- **降级保护**：若本地已有同一 `instanceId` 且保存了 CA 的远程记录，新的配对必须把 `requiresCa` 置为 true（即使新密钥不要求 CA）。
+- **降级保护**：若本地已有同一 `instanceId` 且保存了 CA 的远程记录，新的配对必须把 `requiresCa` 置为 true（即使新密钥不要求 CA）。`preserveRemotePin` 规则已在 `AppService.pair()` 中接线：配对前按 `instanceId` 查本地记录，命中带 CA 的远程记录即把密钥升级为要求 CA，`ca.cer` 404 时硬失败。
 
-  > **实现状态**：该规则已在 `PairingKey.ets` 的 `preserveRemotePin` 中实现，但**尚未接入配对流程**（缺口登记见 [ARCHITECTURE.md](ARCHITECTURE.md#15-已知缺口与后续工作)，验证用例见 [TESTING.md](TESTING.md) 的 TC-18B）。接线之前，本条不得视为对本客户端的已生效约束。
+  > **已生效**（2026-11-24）：规则由设备端自检覆盖（4 条，见 [TESTING.md](TESTING.md) 的 TC-02）；端到端 TC-18B 仍需要一台公网证书入口的远程电脑才能跑，环境不具备时按 [TESTING.md](TESTING.md) 记录。
 
 > 实现注记：本仓库的 HarmonyOS 客户端与上游 `PairingTrust.selectTrustAnchor` 保持一致——私网（LAN）入口必须提供并校验 `ca.cer`，缺失即按身份不匹配失败；只有公网证书远程入口（密钥不要求 CA 且 `ca.cer` 明确 404）才允许使用平台信任库。判定入口类型的规则见 [ARCHITECTURE.md](ARCHITECTURE.md#15-已知缺口与后续工作)。
 
@@ -693,6 +693,15 @@ GET https://<subnet>.<host>:3443/mobile-access/discovery
 | `429` | `rate_limited` | 被限流 | 频率/并发超过限制 | 退避后重试，避免并发重试 |
 | `5xx` | 任意 | 网关不可用 | 插件内部错误/重启中 | 提示检查电脑端移动访问面板，稍后重试 |
 | 其他 | 任意 | 响应不合规 | 字段缺失、键集合错误、时间戳非法等 | 视为协议不兼容，提示升级插件/客户端 |
+
+> **撤销设备的实际响应（2026-11-24 真机 / dsh-mobile 0.8.15）**：`revokeDevice` 会**删除**设备记录（不是打 `revokedAt` 标记），
+> 因此被撤销的设备访问 `native-probe` / `native-renew` 得到的是 `401 {"error":"authentication_failed"}`，
+> 而不是上表的 `device_revoked`。客户端把它归入“配对失效/已撤销”，提示“这台电脑已不再信任本设备，请删除记录后重新配对”，
+> 不谎称是“配对码过期”。`device_revoked` 分支保留给会回传该错误码的上游版本。
+>
+> **TLS 错误的归类（同轮真机结论）**：HarmonyOS `TLSSocket` 在端口不可达时报 `2303501`（SSL is null），
+> 真正对端证书校验失败报 `2303504`。客户端据此把 `2303504`/`2303505` 判为证书/握手失败、`2303501` 判为网络不可达，
+> 避免“网关没开”被显示成“证书不匹配”。
 
 网络层失败还应区分：
 

@@ -15,7 +15,7 @@ import { GatewayOrigin, parseConnection } from '../protocol/Origin';
 import { derToPem, sha256Hex } from '../protocol/CertPin';
 import { LanDiscovery } from '../protocol/Discovery';
 import { fetchServedCertificate } from '../protocol/TlsHttp';
-import { PairingKey, PairingTarget, pairingKeyFromUrl, parsePairingKey } from '../protocol/PairingKey';
+import { PairingKey, PairingTarget, pairingKeyFromUrl, parsePairingKey, preserveRemotePin } from '../protocol/PairingKey';
 import { validatePairingCa, chainContainsPinnedCa, chainMatchesPinnedCa } from '../protocol/CertPin';
 
 export class PairingResult {
@@ -25,6 +25,20 @@ export class PairingResult {
   constructor(record: DeviceRecord, metadata: GatewayMetadata | undefined) {
     this.record = record;
     this.metadata = metadata;
+  }
+}
+
+/** Human-readable explanation for one classified failure while using an already paired computer. */
+export function describeSessionFailure(failure: AuthFailure): string {
+  switch (failure.kind) {
+    case AuthFailureKind.PAIRING_EXPIRED:
+      // dsh-mobile deletes the device record when it is revoked, so the gateway answers
+      // `401 authentication_failed` and the client cannot tell "revoked" from "credential lost".
+      return '这台电脑已不再信任本设备（可能已在电脑端移除），请重新配对';
+    case AuthFailureKind.DEVICE_EXPIRED:
+      return '设备凭据已过期，请重新配对';
+    default:
+      return describeFailure(failure);
   }
 }
 
@@ -153,6 +167,16 @@ export class AppService {
     return undefined;
   }
 
+  /** Whether any stored record for this computer already carries a pinned CA. */
+  hasPinnedCaFor(instanceId: string): boolean {
+    for (const record of this.devices) {
+      if (record.instanceId === instanceId && record.hasPinnedCa()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   async upsert(record: DeviceRecord): Promise<void> {
     const updated: DeviceRecord[] = [];
     let replaced: boolean = false;
@@ -193,7 +217,13 @@ export class AppService {
   /** Pairs one computer from a validated target and persists the resulting credential. */
   async pair(target: PairingTarget, label: string, displayName: string): Promise<PairingResult> {
     const origin: GatewayOrigin = target.origin();
-    const key: PairingKey = target.key;
+    // A remote computer that once pinned a CA must never be downgraded by a key that does not
+    // require one: the saved anchor outranks the new key (PROTOCOL §3.3 rule 4).
+    const hasSavedCa: boolean = this.hasPinnedCaFor(target.key.instanceId);
+    const key: PairingKey = preserveRemotePin(target.remote, target.key, hasSavedCa);
+    if (key.requiresCa !== target.key.requiresCa) {
+      Log.warn('pair: keeping the saved remote CA (refusing a downgrade to the platform trust store)');
+    }
     const caDer: Uint8Array | undefined = await GatewayClient.fetchPairingCa(origin);
     Log.info(caDer === undefined ? 'pair: gateway served no pairing CA' : 'pair: pairing CA fetched');
     let pinned: Uint8Array;
@@ -307,6 +337,9 @@ export class AppService {
         updated.deviceId = probe.deviceId;
       }
     } else if (failure !== undefined) {
+      // The classified kind drives both the card label and whether "open" is refused locally, so it
+      // is worth a log line: a wrong classification shows up here first.
+      Log.warn(`probe failed: ${failure.kind} ${failure.message}`);
       switch (failure.kind) {
         case AuthFailureKind.DEVICE_REVOKED:
           updated.status = DeviceStatus.REVOKED;

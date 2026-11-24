@@ -13,7 +13,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { Log } from '../common/Log';
 import { Palette } from '../common/Theme';
 import { DeviceRecord } from '../model/DeviceRecord';
-import { AppService, describeFailure, toAuthFailure } from '../service/AppService';
+import { AppService, describeSessionFailure, toAuthFailure } from '../service/AppService';
 import { isExternalHttps, isPinnedAuthority, isSameOrigin } from '../protocol/Origin';
 
 const SESSION_REFRESH_MS: number = 10 * 60 * 1000;
@@ -62,7 +62,7 @@ export struct BrowserView {
       this.url = `${this.record.origin().serialized()}/`;
       this.ready = true;
     }).catch((error: Object) => {
-      this.failure = describeFailure(toAuthFailure(error));
+      this.failure = describeSessionFailure(toAuthFailure(error));
       this.loading = false;
     });
   }
