@@ -128,6 +128,26 @@ Remove-Item -Recurse -Force '.hvigor\cache'
 - 编译报告写入 `.hvigor/report/report-*.json`；
 - ArkTS 编译错误会直接以 `ERROR` 形式出现在控制台并返回非 0 退出码。命令行的退出码是判断成败的唯一依据，不要只看“产物看起来生成了”。
 
+### 3.5 仓库内辅助脚本
+
+仓库提供两个 PowerShell 脚本，内部执行的构建/安装动作与上文一致，便于固定参数：
+
+```powershell
+# 构建 debug HAP（等价于 3.1，自动尝试常见 DevEco 安装路径与 JDK）
+pwsh -File scripts\build.ps1
+
+# 构建 release HAP（未配置签名时产物仍是 unsigned）
+pwsh -File scripts\build.ps1 -Mode release
+
+# 安装已签名 HAP 到设备（自动在 DevEco SDK 中找到 hdc.exe）
+pwsh -File scripts\install.ps1 -Hap entry\build\default\outputs\default\entry-default-signed.hap
+
+# 卸载
+pwsh -File scripts\install.ps1 -Uninstall
+```
+
+脚本可通过 `DEVECO_STUDIO_HOME` / `DEVECO_SDK_HOME` / `NODE_HOME` / `JAVA_HOME` 覆盖自动探测的路径。`-Mode release` 只改变构建模式，**不会自动签名**。本机实际验证过的是 3.1 的显式命令；脚本是同一命令的封装，使用前建议先确认脚本输出的 DevEco/SDK/JDK 路径与本机一致。
+
 ---
 
 ## 4. DevEco Studio 图形界面构建

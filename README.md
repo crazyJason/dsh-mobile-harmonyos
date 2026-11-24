@@ -37,7 +37,7 @@
 
 | 能力 | 说明 |
 | --- | --- |
-| 配对链接解析 | 支持 `dsh1.*` / `dsh2.*` / 旧版 `instance=...&token=...` 片段；严格校验 origin、端口、片段格式 |
+| 配对链接解析 | 支持 `key=dsh2.*` 片段与旧版 `instance=...&token=...` 片段；`dsh1` 密钥本身可解析（识别为“不要求 CA”），但完整 `dsh1` 配对 URL 的流程尚未打通，见[已知限制](#已知限制) |
 | 网关身份校验 | 下载 `/mobile-access/ca.cer`，校验「CA 基本约束 + 自签名 + 有效期 + SHA-256 == instanceId」 |
 | 原生配对 | `POST /mobile-access/auth/native-pair`，拿到 `deviceToken` / `sessionToken` / `csrfToken` |
 | 会话续期与探活 | `native-renew`、`native-probe`，用于恢复连接与判断设备是否被吊销 |
@@ -45,6 +45,7 @@
 | 已配对设备管理 | 元数据存 `@ohos.data.preferences`，设备凭据存 **Asset Store Kit**，列表、重命名、删除 |
 | 网页浏览 | ArkWeb 容器加载已配对 origin 的 DSH 移动端页面，注入 `dsh_ma_*` 会话 Cookie |
 | 失败分类 | 401/403、409、429、`device_revoked` / `device_expired` / `source_network_untrusted` 等给出可读提示 |
+| 设备端协议自检 | 在手机上直接跑 origin/密钥/配对链接的纯规则检查，用于确认安装的构建与协议文档一致 |
 
 **未实现（有意延后或受平台限制）**
 
@@ -76,7 +77,7 @@
 
 ## 环境要求
 
-以下版本是本项目实际验证过的组合（Windows 11）：
+以下版本是本项目实际验证过的组合（Windows + PowerShell）：
 
 | 组件 | 版本 / 路径 |
 | --- | --- |
@@ -121,6 +122,7 @@ entry/build/default/outputs/default/entry-default-unsigned.hap
 - 这是 **unsigned**（未签名）HAP，只能证明编译通过，不能直接安装。
 - 不要用 `hvigorw assembleHap` 依赖 PATH 里恰好存在的 `hvigorw`；使用上面给出的 `node <hvigorw.js>` 绝对路径最稳。
 - 工程没有第三方 ohpm 依赖，不需要联网执行 `ohpm install`（首次构建 hvigor 会自行准备工具链）。
+- 仓库还提供 `scripts/build.ps1`（构建）与 `scripts/install.ps1`（安装/卸载）两个封装脚本，参数与上面的命令一致，详见 [docs/BUILD.md](docs/BUILD.md#35-仓库内辅助脚本)。
 
 ## 签名与真机安装
 
@@ -198,6 +200,8 @@ hdc install -r entry\build\default\outputs\default\entry-default-signed.hap
 7. **未移植外围功能**：应用内更新、后台常驻服务、画中画、草稿传输、启动缓存等 Android 侧功能。
 8. **只支持一对一网关的 HTTPS 浏览**：不代理 DSH 的其他端口，也不做本地反向代理。
 9. **签名材料需要自备**：仓库不含任何证书、Profile 或密钥。
+10. **公网证书（`dsh1`）入口的配对流程尚未打通**：`pairingKeyFromUrl` 只接受 `key=dsh2.*` 与旧版 `instance=...&token=...` 片段，完整 `dsh1` 配对 URL 会被判定为“没有有效配对密钥”。代码里已有“`ca.cer` 404 → 平台信任库”的分支，但链接解析未接入，因此公网证书入口目前无法完成配对。
+11. **删除本地记录不会主动清除 ArkWeb 会话 Cookie**：旧 Cookie 可能保留到会话过期（仍受 host-only / HTTPS / SameSite=Strict 约束，且只属于同一台电脑）；重新配对成功后会覆盖同名 Cookie。
 
 ## 排障
 
@@ -205,7 +209,7 @@ hdc install -r entry\build\default\outputs\default\entry-default-signed.hap
 | --- | --- | --- |
 | 粘贴链接后提示格式错误 | 链接被截断、被聊天工具改写成 `http`、端口缺失或片段丢失 | 复制完整链接，确认是 `https://.../mobile-access/pair#...`；可由电脑重新生成配对码 |
 | 提示证书/指纹不匹配 | 电脑换了配对 CA、链接来自另一台电脑、或中间人替换 | **不要**重试忽略；在电脑上重新生成配对链接后重新配对 |
-| `dsh2` 链接提示缺少 CA（404） | 入口不是自签 CA 模式（公网证书入口才会 404），或端口指向了错误的网关 | 确认电脑上插件的入口类型；公网证书入口应使用 `dsh1` 链接 |
+| `dsh2` 链接提示缺少 CA（404） | 入口不是自签 CA 模式（公网证书入口才会 404），或端口指向了错误的网关 | 确认电脑上插件的入口类型；公网证书入口应使用 `dsh1` 链接（当前版本尚未打通 `dsh1` 配对流程，见[已知限制](#已知限制)） |
 | `HTTP 401/403` | 配对码已过期/已被使用，或设备被吊销 | 在电脑上重新生成配对码；若设备列表里已无此设备，先删除本地记录再配对 |
 | `HTTP 409` | 电脑端设备数量达到上限 | 在电脑端 dsh-mobile 设备管理里删除旧设备后重试 |
 | `HTTP 429` | 触发配对/续期频率限制 | 等待一段时间再试；不要连续重试 |
@@ -224,7 +228,7 @@ hdc shell hilog -T DshMobile
 ## 目录结构
 
 ```text
-dsh-mobile-harmonyos/
+dsh-hmos-mobile/
 ├── AppScope/                       # 应用级配置（bundleName、版本、图标、应用名）
 ├── entry/
 │   ├── build-profile.json5         # entry 模块构建配置（stage 模式、release 混淆关闭）
@@ -234,7 +238,7 @@ dsh-mobile-harmonyos/
 │       ├── module.json5            # ability、页面入口、权限声明
 │       ├── ets/
 │       │   ├── entryability/       # UIAbility 生命周期入口
-│       │   ├── common/             # Log（hilog 封装）、Json（有界 JSON 读取）
+│       │   ├── common/             # Log、Json、Theme、SelfCheck
 │       │   ├── protocol/           # 协议与 TLS 核心
 │       │   │   ├── Origin.ets      # HTTPS origin / 配对 URL 解析，同源判定
 │       │   │   ├── PairingKey.ets  # dsh1/dsh2/legacy 配对 key 解析
@@ -250,6 +254,9 @@ dsh-mobile-harmonyos/
 ├── hvigor/                         # hvigor 版本与构建缓存配置
 ├── build-profile.json5             # 产品级构建配置（SDK 版本、bundle 信息）
 ├── oh-package.json5                # 工程依赖（无第三方依赖）
+├── scripts/                        # 构建与安装的 PowerShell 封装
+│   ├── build.ps1                   # 命令行构建 HAP
+│   └── install.ps1                 # 通过 hdc 安装/卸载已签名 HAP
 ├── docs/                           # 构建、协议、架构、测试文档
 ├── README.md
 └── .gitignore
