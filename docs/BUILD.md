@@ -35,7 +35,7 @@
 | `compatibleSdkVersion` | `5.0.0(12)` | 最低兼容 API 12；工程刻意不用 API 12 之后才有的网络 API |
 | `targetSdkVersion` | `6.0.0(20)` | 目标 API 20 |
 | `runtimeOS` | `HarmonyOS` | 仅面向 HarmonyOS NEXT |
-| `bundleName` | `io.github.sayach.dshmobile.hmos` | 安装包唯一标识 |
+| `bundleName` | `io.github.crazyjason.dshmobile.hmos` | 安装包唯一标识 |
 | 设备类型 | `phone`、`tablet`、`2in1` | `entry/src/main/module.json5` |
 
 > 用 API 26 的 SDK 编译、兼容 API 12 是可行且已在本机验证的组合。`build-profile.json5` 中的版本值不要随意改动：`compatibleSdkVersion` 决定了 `@ohos.net.http` 等 API 是否可用，而本项目为了在 API 12 上固定自签 CA，绕开了 `@ohos.net.http`（原因见 [ARCHITECTURE.md](ARCHITECTURE.md#95-为什么用-tlssocket-而不是-ohosnethttp)）。
@@ -265,7 +265,7 @@ D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe
 & 'D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe' install -r 'entry\build\default\outputs\default\entry-default-signed.hap'
 
 # 3. 卸载（排查问题时使用）
-& 'D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe' uninstall io.github.sayach.dshmobile.hmos
+& 'D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe' uninstall io.github.crazyjason.dshmobile.hmos
 ```
 
 ### 6.3 查看运行日志
@@ -285,7 +285,7 @@ D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe
 | `signature verify failed` / 安装被拒 | 使用了 unsigned HAP，或签名与 Profile 不匹配 | 用 DevEco 自动签名重新构建；确认安装的是签名后的 HAP |
 | 设备未出现在 `hdc list targets` | USB 调试未开、线材仅充电、驱动异常 | 换线/换口，重新授权调试 |
 | 安装成功但无法启动 | 签名 Profile 不包含该设备（调试 Profile 设备列表） | 在 AppGallery Connect/DevEco 中把设备加入调试 Profile |
-| bundleName 冲突 | 手机上已装同 bundleName 的其他版本 | `hdc uninstall io.github.sayach.dshmobile.hmos` 后重装 |
+| bundleName 冲突 | 手机上已装同 bundleName 的其他版本 | `hdc uninstall io.github.crazyjason.dshmobile.hmos` 后重装 |
 | 设备存储空间不足 | — | 清理空间后重试 |
 
 > 换真机型号后，DevEco 自动签名通常需要重新生成 Profile（调试设备列表变化）。

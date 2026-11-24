@@ -34,7 +34,7 @@ $targetArgs = @()
 if ($Device) { $targetArgs = @('-t', $Device) }
 
 if ($Uninstall) {
-  & $hdc @targetArgs uninstall 'io.github.sayach.dshmobile.hmos'
+  & $hdc @targetArgs uninstall 'io.github.crazyjason.dshmobile.hmos'
   exit $LASTEXITCODE
 }
 

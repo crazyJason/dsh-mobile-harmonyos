@@ -89,10 +89,10 @@ foreach ($path in $required) {
 # ------------------------------------------------------------ config sanity
 Section '2. Project configuration'
 $appJson = Get-Content 'AppScope/app.json5' -Raw
-if ($appJson -match '"bundleName"\s*:\s*"([A-Za-z0-9_.]+)"' -and $Matches[1] -eq 'io.github.sayach.dshmobile.hmos') {
+if ($appJson -match '"bundleName"\s*:\s*"([A-Za-z0-9_.]+)"' -and $Matches[1] -eq 'io.github.crazyjason.dshmobile.hmos') {
   Pass 'bundleName matches the ADR-0004 namespace'
 } else {
-  Fail 'bundleName' 'AppScope/app.json5 must keep io.github.sayach.dshmobile.hmos (see docs/adr/0004)'
+  Fail 'bundleName' 'AppScope/app.json5 must be io.github.crazyjason.dshmobile.hmos (see docs/adr/0004)'
 }
 
 $profile = Get-Content 'build-profile.json5' -Raw

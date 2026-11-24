@@ -93,7 +93,7 @@
 | --- | --- |
 | `compatibleSdkVersion` | `5.0.0(12)`（最低兼容 API 12） |
 | `targetSdkVersion` | `6.0.0(20)` |
-| `bundleName` | `io.github.sayach.dshmobile.hmos` |
+| `bundleName` | `io.github.crazyjason.dshmobile.hmos` |
 | 设备类型 | `phone` / `tablet` / `2in1` |
 | 模块 | `entry`（Stage 模型） |
 
