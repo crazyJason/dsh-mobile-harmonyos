@@ -7,6 +7,7 @@
  */
 import { parseConnection, parseOrigin, isSameOrigin, isPinnedAuthority } from '../protocol/Origin';
 import { parsePairingKey, pairingKeyFromUrl } from '../protocol/PairingKey';
+import { parseAsn1Time } from '../protocol/CertPin';
 
 export class SelfCheckResult {
   readonly passed: string[];
@@ -65,6 +66,13 @@ export function runSelfCheck(): SelfCheckResult {
   check('兼容旧版配对片段', legacyConnection !== undefined, result);
   check('拒绝非配对路径的链接',
     parseConnection(`https://192.168.1.20:3443/other#key=${dsh2Key}`) === undefined, result);
+
+  // Certificate validity timestamps are ASN.1 time, not ISO-8601: a wrong format silently
+  // rejects every LAN pairing, so the parser is exercised here.
+  check('解析 UTCTime 有效期', parseAsn1Time('250101000000Z') === Date.UTC(2025, 0, 1, 0, 0, 0), result);
+  check('解析 GeneralizedTime 有效期', parseAsn1Time('20510101000000Z') === Date.UTC(2051, 0, 1, 0, 0, 0), result);
+  check('拒绝非 ASN.1 时间', parseAsn1Time('2025-01-01T00:00:00Z') === undefined, result);
+  check('拒绝越界月份', parseAsn1Time('251301000000Z') === undefined, result);
 
   return result;
 }
