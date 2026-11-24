@@ -2,14 +2,15 @@
 
 面向 [DeepSeek Harness](https://github.com/saya-ch/dsh-mobile) 社区插件 **dsh-mobile** 的 HarmonyOS NEXT（ArkTS / ArkUI）原生手机客户端。它复刻上游 Android 客户端的配对与浏览能力，让 HarmonyOS 手机可以连接运行着 DeepSeek Harness + dsh-mobile 插件的电脑。
 
-> **English summary.** `dsh-mobile-harmonyos` is a native HarmonyOS NEXT (ArkTS/ArkUI) client for the community DeepSeek Harness plugin [`dsh-mobile`](https://github.com/saya-ch/dsh-mobile). The upstream project ships an Android WebView shell that cannot be installed on HarmonyOS NEXT, because HarmonyOS NEXT no longer runs Android APKs. This project reimplements the phone-side client natively: it parses the plugin's one-time pairing link, pins the gateway's self-signed pairing CA against the SHA-256 `instanceId` carried in that link, calls the plugin's `native-pair` / `native-renew` / `native-probe` control endpoints over a hand-written `TLSSocket` HTTP/1.1 client, stores the long-lived device credential in the Asset Store Kit, and loads the DSH mobile page in an ArkWeb container with the paired session cookies installed. The project has been compiled into a HAP on the development machine described below and, as of 2026-11-24, installed and paired on a real HarmonyOS 7 phone: LAN pairing against a pinned self-signed CA, the ArkWeb session, and recovery after a process restart all work; failure paths, network switching and remote entries remain untested. **Treat everything outside that LAN main flow as untested device behaviour.**
+> **English summary.** `dsh-mobile-harmonyos` is a native HarmonyOS NEXT (ArkTS/ArkUI) client for the community DeepSeek Harness plugin [`dsh-mobile`](https://github.com/saya-ch/dsh-mobile). The upstream project ships an Android WebView shell that cannot be installed on HarmonyOS NEXT, because HarmonyOS NEXT no longer runs Android APKs. This project reimplements the phone-side client natively: it parses the plugin's one-time pairing link, pins the gateway's self-signed pairing CA against the SHA-256 `instanceId` carried in that link, calls the plugin's `native-pair` / `native-renew` / `native-probe` control endpoints over a hand-written `TLSSocket` HTTP/1.1 client, stores the long-lived device credential in the Asset Store Kit, and loads the DSH mobile page in an ArkWeb container with the paired session cookies installed. The project has been compiled into a HAP on the development machine described below and, as of 2026-11-24, installed and paired on a real HarmonyOS 7 phone: LAN pairing against a pinned self-signed CA, the ArkWeb session, recovery after a process restart, and the main failure paths (expired/reused/wrong pairing codes, revocation, unreachable gateway, impostor certificate, Wi-Fi↔cellular switch, background/foreground, session loss) all behave as documented. Device limits, rate limiting, untrusted-CIDR 403 and public-CA/FRP remote entries remain untested.
 
 > **项目状态**
 >
 > - ✅ 已在本机（DevEco Studio 26.0.0 / HarmonyOS SDK API 26 / hvigor 6.26.9 / JDK 17）用命令行完整编译，产物为 `entry/build/default/outputs/default/entry-default-unsigned.hap`。
 > - ✅ 已在真机安装并跑通局域网主流程（2026-11-24，HUAWEI Mate 60 Pro+ / HarmonyOS 7.0.0.111 / API 26）：DevEco 自动签名 → 安装 → 局域网配对（`dsh2` 密钥 + 自签 CA 固定）→ ArkWeb 登录浏览 DSH 主页 → 进程重启后恢复。
+> - ✅ 已在真机跑通失败路径与生命周期（同轮）：错误/重复/过期配对码、撤销设备、网关不可达、非法输入、证书不匹配、局域网无 `ca.cer` 硬失败、Wi-Fi↔移动网络切换、前后台切换、会话丢失后续期。
 > - ⛔ 未签名 HAP 无法安装到真机；签名需要 DevEco Studio 自动签名（登录华为账号）或自备签名材料。
-> - ⛔ 失败路径、网络切换、远程入口与负向证书实验**仍未执行**；这些场景下的行为仍以潜在缺陷看待，执行记录见 [docs/TESTING.md](docs/TESTING.md#11-执行记录2026-11-24-第一轮)。
+> - ⛔ **仍未执行**：设备上限、限流、受信网段 403、公网证书/FRP 远程入口、端到端远程降级（规则已由设备端自检覆盖）。执行记录见 [docs/TESTING.md](docs/TESTING.md#11-执行记录2026-11-24-第一轮)。
 > - 上游是协议的事实来源（source of truth），本项目与它的对应关系见 [docs/PROTOCOL.md](docs/PROTOCOL.md)。
 
 ---
@@ -210,7 +211,7 @@ hdc install -r entry\build\default\outputs\default\entry-default-signed.hap
 
 ## 已知限制
 
-1. **真机验收只覆盖局域网主流程**：2026-11-24 已在真机上跑通安装、配对、ArkWeb 浏览与重启恢复；失败路径、网络切换、远程入口仍未验证（见 [docs/TESTING.md](docs/TESTING.md#11-执行记录2026-11-24-第一轮)）。
+1. **真机验收覆盖局域网主流程与失败路径**：2026-11-24 已在真机上跑通安装、配对、浏览、重启恢复、撤销、过期码、网关不可达、证书不匹配、换网与前后台切换；设备上限、限流、受信网段与公网证书/FRP 远程入口仍未验证（见 [docs/TESTING.md](docs/TESTING.md#11-执行记录2026-11-24-第一轮)）。
 2. **无原生扫码**：必须复制/粘贴配对链接或裸密钥；**未申请相机权限**（`module.json5` 只声明 `INTERNET` / `GET_NETWORK_INFO`），扫码 UI 未实现。
 3. **无推送**：没有 `mobile-push` 注册，后台任务完成/需要确认时不会收到系统通知。
 4. **无 iroh**：上游 Android 的 iroh 点对点传输未移植；仅支持 HTTPS 直连入口（局域网、自签名 FRP、公网证书）。
