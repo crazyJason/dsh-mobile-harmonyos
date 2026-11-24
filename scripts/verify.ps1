@@ -68,6 +68,7 @@ $required = @(
   'entry/src/main/ets/common/Json.ets',
   'entry/src/main/ets/common/Theme.ets',
   'entry/src/main/ets/common/SelfCheck.ets',
+  'entry/src/main/ets/common/Scanner.ets',
   'README.md',
   'AGENTS.md',
   'LICENSE',
@@ -106,10 +107,13 @@ $module = Get-Content 'entry/src/main/module.json5' -Raw
 foreach ($permission in @('ohos.permission.INTERNET', 'ohos.permission.GET_NETWORK_INFO')) {
   if ($module.Contains($permission)) { Pass "declares $permission" } else { Fail 'permission' $permission }
 }
+# ADR-0006: scanning is delegated to the system Scan Kit UI, which owns the camera preview in the
+# system process. Declaring CAMERA would grant the app a capability it does not use, and it would
+# also invite a home-grown viewfinder (which then needs the permission for real).
 if ($module.Contains('ohos.permission.CAMERA')) {
-  Fail 'permission' 'CAMERA must not be declared while no scanner exists'
+  Fail 'permission' 'CAMERA must not be declared: the system Scan Kit UI scans in its own process (ADR-0006)'
 } else {
-  Pass 'no CAMERA permission declared'
+  Pass 'no CAMERA permission declared (system Scan Kit scans in its own process)'
 }
 
 # brace/bracket balance of the JSON5 files we ship
@@ -223,6 +227,21 @@ if ($rawHilog.Count -eq 0) {
   Pass 'hilog is only called from common/Log.ets (domain 0x0D5B)'
 } else {
   Fail 'direct hilog call' (($rawHilog | ForEach-Object { "$($_.Path.Replace("$root\", '')):$($_.LineNumber)" }) -join ', ')
+}
+
+# ADR-0006: the scan channel has exactly one entry point. A page that imported Scan Kit directly
+# could act on a scanned payload without `interpretPairingInput`, i.e. skip the protocol rules the
+# payload is still subject to.
+$scanKit = $etsFiles | Select-String -Pattern "@kit\.ScanKit" -List
+if ($null -eq $scanKit) {
+  Fail 'scan channel' 'nothing imports @kit.ScanKit: common/Scanner.ets is missing or unwired'
+} else {
+  $scanKitStrays = @($scanKit | Where-Object { $_.Path -notmatch '\\common\\Scanner\.ets$' })
+  if ($scanKitStrays.Count -eq 0) {
+    Pass 'Scan Kit is imported only by common/Scanner.ets (ADR-0006)'
+  } else {
+    Fail 'ADR-0006 violated' (($scanKitStrays | ForEach-Object { $_.Path.Replace("$root\", '') }) -join ', ')
+  }
 }
 
 # --------------------------------------------------------------- documentation

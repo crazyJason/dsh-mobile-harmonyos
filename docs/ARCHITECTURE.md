@@ -98,7 +98,8 @@
 | `common/Json.ets` | 有界、类型安全的 JSON 读取（不做整体 `as` 断言） | `parseJsonObject`、`readString`、`readNumber`、`keyCount` |
 | `common/Log.ets` | hilog 封装（domain `0x0D5B`、tag `DshMobile`） | `Log` |
 | `common/Theme.ets` | 深色主题调色板与相对时间格式化 | `Palette`、`formatRelative` |
-| `common/SelfCheck.ets` | 设备端协议规则自检（origin 解析与拒绝规则、`dsh1`/`dsh2` 密钥、配对链接与 legacy 片段、同源与 `wss:` 固定 authority、ASN.1 有效期解析） | `runSelfCheck`、`SelfCheckResult` |
+| `common/SelfCheck.ets` | 设备端协议规则自检（origin 解析与拒绝规则、`dsh1`/`dsh2` 密钥、配对链接与 legacy 片段、同源与 `wss:` 固定 authority、ASN.1 有效期解析、扫码输入的入口分类） | `runSelfCheck`、`SelfCheckResult` |
+| `common/Scanner.ets` | 扫码输入通道：调用系统 Scan Kit 默认界面扫单个二维码，返回原文；取消与失败分开返回。**不解析、不校验**，结果必须交给 `interpretPairingInput` | `scanPairingQr`、`ScanOutcome`、`ScanStatus` |
 
 ## 4. 应用启动与生命周期
 
@@ -123,6 +124,7 @@ ArkTS 的 UI 与业务代码运行在应用主线程的事件循环上。本项�
 | 设备状态刷新 | 对每台设备并行 `probe` | UI 先置 `CHECKING`，回填后整体刷新列表 |
 | 会话续期 | 进入浏览页前 `await`；浏览中每 10 分钟后台续期 | 续期失败仅告警，不主动踢出页面；下次进入会重试 |
 | 配对 | 用户点击「开始配对」后串行执行（`busy` 标志） | 防止重复提交 token（token 一次性，重复提交会失败） |
+| 扫码 | `scanBarcode.startScanForResult()` 返回 `Promise`，扫码 UI 在系统进程 | UI 用 `scanQrBusy` 防重复；扫到完整链接后直接进入同一条串行配对流程 |
 
 注意事项：
 
@@ -165,7 +167,7 @@ ArkTS 的 UI 与业务代码运行在应用主线程的事件循环上。本项�
 ## 7. 配对流程
 
 ```text
-用户粘贴链接/密钥
+用户扫码 / 粘贴链接 / 粘贴裸密钥
       │
       ▼
 interpretPairingInput()                     service/AppService.ets
@@ -198,6 +200,7 @@ Index 回到列表视图并刷新
 
 关键行为：
 
+- **扫码只是输入通道**：`common/Scanner.ets` 用系统 Scan Kit 默认界面拿到二维码原文，随后走同一个 `interpretPairingInput`，因此扫到的完整链接与粘贴的完全等价，不新增信任分支（[ADR-0006](adr/0006-scan-with-system-scankit-ui.md)）；扫到的裸密钥仍需用户补地址。
 - **局域网/私网入口必须提供 CA**：`target.remote === false` 时，`/mobile-access/ca.cer` 404 直接以 `AuthFailureKind.TLS` 失败，不进入系统信任库；这与上游 `PairingTrust.selectTrustAnchor` 的 LAN 规则一致。
 - **只有公网证书远程入口允许 404 回退**：`target.remote === true` 且密钥 `requiresCa === false` 时，404 才使用平台信任库（`pairWithSystemTrust()`）。
 - **`dsh2` 强制 CA**：即使远程，`requiresCa === true` 的密钥在 404 时同样硬失败。`#key=dsh1...` 不是上游生成的片段，客户端按上游规则拒绝，属于预期行为。
@@ -368,8 +371,8 @@ ArkWeb 对自签证书会触发 `onSslErrorEvent`。本项目不盲目 `handleCo
 | Android 组件 | 本项目模块 | 对应内容与差异 |
 | --- | --- | --- |
 | `GatewayUrlPolicy.kt`（`GatewayOrigin` / `GatewayConnection` / `GatewayUrlPolicy`） | `protocol/Origin.ets` | 同样的 HTTPS-only、origin 规范化、配对 URL 解析、同源/`wss` authority 判定。Android 用 `java.net.URI`；ArkTS 手写 `splitUrl` 以避免平台 URI 的宽松归一化 |
-| `PairingTrust.kt`、`RemotePairingTrust.kt` | `protocol/PairingKey.ets` + `protocol/CertPin.ets` | Android 在 `PairingTrust` 内完成 CA 校验与 `preserveRemotePin`；ArkTS 拆成密钥解析（PairingKey）与证书校验（CertPin）。`preserveRemotePin` 已实现但当前 UI 流程未接入 |
-| `PairingScanPolicy.kt` | `protocol/PairingKey.ets` | Android 由扫码结果 + 用户选择模式决定 LAN/REMOTE；ArkTS 由 origin 主机判断：`isPrivateNetworkHost`（私有 IPv4、CGNAT `100.64/10`、`localhost`）视为局域网，其余主机名/公网地址视为远程。未复刻上游对 cpolar/cloudflared/ts.net 等隧道厂商后缀的细分 |
+| `PairingTrust.kt`、`RemotePairingTrust.kt` | `protocol/PairingKey.ets` + `protocol/CertPin.ets` | Android 在 `PairingTrust` 内完成 CA 校验与 `preserveRemotePin`；ArkTS 拆成密钥解析（PairingKey）与证书校验（CertPin）。`preserveRemotePin` 已在 `AppService.pair()` 接线：配对前按 `instanceId` 查本地带 CA 的远程记录 |
+| `PairingScanPolicy.kt` | `protocol/PairingKey.ets`、`protocol/Origin.ets` | Android 由扫码结果 + 用户选择模式决定 LAN/REMOTE；ArkTS 由 origin 主机判断：`isPrivateNetworkHost`（私有 IPv4、CGNAT `100.64/10`、IPv6 回环/ULA/链路本地、`localhost`）视为局域网，其余主机名/公网地址视为远程。同一条判定也给手填地址选缺省端口（LAN `3443`、公网 `443`）。未复刻上游对 cpolar/cloudflared/ts.net 等隧道厂商后缀的细分 |
 | `PinnedTls.kt` | `protocol/TlsHttp.ets` + `protocol/CertPin.ets` | Android 用 `SSLContext` + 自定义 `TrustManagerFactory`（只含固定 CA），并校验 WebView 叶子证书（SAN、EKU、有效期）；ArkTS 用 `TLSSocket.secureOptions.ca` 完成握手信任，再由 `CertPin.ets` 做指纹与“leaf 由固定 CA 验签”的链校验，未实现 SAN/EKU 细分检查 |
 | `NativeAuthClient.kt` | `protocol/GatewayHttp.ets` | 同样的接口与响应校验；Android 用 `HttpsURLConnection` + `SSLSocketFactory`，ArkTS 用手写 HTTP/1.1。Android 的超时组合更细（connect/read 分开），ArkTS 以总超时近似 |
 | `LanDiscovery.kt` | `protocol/Discovery.ets`（UDP 部分） | 同样的查询串、端口、公告 5 键校验、发送方地址校验、按 instanceId 合并；Android 用 `DatagramSocket`，ArkTS 用 `UDPSocket` |
@@ -379,7 +382,7 @@ ArkWeb 对自签证书会触发 `onSslErrorEvent`。本项目不盲目 `handleCo
 | `NativeSessionCookieInstaller.kt` / `NativeSessionCookies.kt` | `service/AppService.ets#installCookies` | 同样的 4 个 Cookie 名与属性；Android 写 `CookieManager`，ArkTS 写 `WebCookieManager` |
 | `SecureWebViewClient.kt`（SSL 续接） | `pages/BrowserView.ets#handleSslError` + `AppService.shouldContinueSslError` | 同样的“链中固定 CA 或 leaf 可由固定 CA 验签才放行”策略 |
 | `NativeBridge.kt`、`NativeBridgePolicy.kt` | **未实现** | 页面检测不到 `window.dshMobileNative`，运行在上游支持的浏览器模式 |
-| `QrDecoder.kt`、`ScanActivity.kt` | **未实现** | 无扫码入口；`module.json5` 未申请相机权限（仅 `INTERNET` / `GET_NETWORK_INFO`），改为粘贴链接或裸密钥 + 地址 |
+| `QrDecoder.kt`、`ScanActivity.kt` | `common/Scanner.ets` | 上游自绘扫码 Activity + 自带解码器；本项目改为调用系统 Scan Kit 默认界面（`startScanForResult`），相机预览在系统进程内，因此仍不申请 CAMERA。差异：不能定制取景界面，且依赖设备上的 HMS Scan 服务（[ADR-0006](adr/0006-scan-with-system-scankit-ui.md)） |
 | `DeviceStatusPoller.kt` | `pages/Index.ets#refreshStatuses` + `AppService.probe` | 简化版：进入列表时逐台探活、菜单里可“立即检测”，没有周期性轮询器 |
 | `IrohConnectionController.kt`、`IrohHttpsTransport.kt` 等 | **未实现** | 只支持 HTTPS 直连入口 |
 | `AppUpdateChecker.kt` / `BackgroundNotificationService.kt` / `TaskNotificationPublisher.kt` | **未实现** | 无应用内更新、无后台通知 |
@@ -400,17 +403,19 @@ ArkWeb 对自签证书会触发 `onSslErrorEvent`。本项目不盲目 `handleCo
 9. **会话 Cookie 仅 host-only、HTTPS、Strict**；
 10. **Web 容器导航限制在固定 authority**，其余 HTTPS 交给系统浏览器；
 11. **SSL 错误只在能证明链属于固定 CA 时续接**；
-12. **签名材料不入库**（`.gitignore` 覆盖 `*.p7b`、`*.p12`、`*.cer`、`*.pem`）。
+12. **签名材料不入库**（`.gitignore` 覆盖 `*.p7b`、`*.p12`、`*.cer`、`*.pem`）；
+13. **扫码不是信任捷径**：扫码原文与粘贴输入走同一个 `interpretPairingInput`，Scan Kit 只允许在 `common/Scanner.ets` 中被引入（`verify.ps1` 守卫）。
 
 ## 15. 已知缺口与后续工作
 
 | 缺口 | 影响 | 方向 |
 | --- | --- | --- |
-| 远程/局域网模式判定比上游简单 | 以 `isPrivateNetworkHost` 判定：私有 IPv4、CGNAT `100.64/10`、`localhost` 为 LAN，其余主机名/公网地址为 REMOTE；不识别 cpolar/cloudflared/ts.net 等隧道厂商后缀。影响仅限超时档位、列表标签与“私网必须供 CA”的判定；证书/凭据校验本身不变 | 可选：复刻上游 `RemoteHostPolicy` 的细分规则 |
+| 远程/局域网模式判定比上游简单 | 以 `isPrivateNetworkHost` 判定：私有 IPv4、CGNAT `100.64/10`、IPv6 回环/ULA/链路本地、`localhost` 为 LAN，其余主机名/公网地址为 REMOTE；不识别 cpolar/cloudflared/ts.net 等隧道厂商后缀。影响仅限超时档位、列表标签、手填地址的缺省端口（LAN `3443` / 公网 `443`）与“私网必须供 CA”的判定；证书/凭据校验本身不变 | 可选：复刻上游 `RemoteHostPolicy` 的细分规则 |
 | 协议层中 `fetchMetadata` 未接入主流程（`preserveRemotePin` 已在配对流程接线，`isPinnedAuthority` 已用于 SSL 续接与自检，`fetchServedCertificate` 已用于 TLS 诊断日志） | metadata 兼容性提示尚未使用 | 在诊断流程中接入 |
 | 删除本地设备记录时未主动清除 ArkWeb 中已注入的会话 Cookie | 旧 Cookie 可能残留到会话过期（仍受 host-only/HTTPS/Strict 约束，且只属于同一台电脑） | 在删除/重新配对时用同名 Cookie 过期（`Max-Age=0`）清理 |
 | 无 `window.dshMobileNative` 原生桥 | 页面原生增强能力不可用 | 按上游 `NativeBridgePolicy` 定义消息白名单后再实现 |
-| 无推送 / 无 iroh / 无扫码 / 无原生文件选择器 | 见 [README 已知限制](../README.md#已知限制) | 后续版本 |
+| 无推送 / 无 iroh / 无原生文件选择器 | 见 [README 已知限制](../README.md#已知限制) | 后续版本 |
+| 扫码依赖系统 Scan Kit 默认界面 | 界面外观不可定制；设备缺少 HMS Scan 服务时扫码不可用（此时只能粘贴）。以 `1000500002` 区分「用户取消」，其余失败提示改用粘贴 | 粘贴路径永久保留作为兜底；需要定制时按 [ADR-0006](adr/0006-scan-with-system-scankit-ui.md) 重新评估 |
 | 无真机自动化测试、无 ArkTS 单元测试 | 协议规则只有自检 + 手工测试 | 引入 ohosTest / Hypium 或把纯规则抽到可测模块 |
 | API 12 上的 HttpOnly Cookie 写入依赖降级 | 旧系统上 `HttpOnly` Cookie 可能以非 HttpOnly 形式写入（仍受 HTTPS/host-only 约束） | 跟踪 ArkWeb 能力，必要时改用 `runJavaScript` 兜底（需评估安全性） |
 

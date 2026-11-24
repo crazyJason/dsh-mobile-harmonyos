@@ -261,6 +261,46 @@ export function parseConnection(rawValue: string): GatewayConnection | undefined
   return new GatewayConnection(origin, initialUrl);
 }
 
+/** Default port for an address typed without one: the LAN listener runs on 3443, public entries on 443. */
+export function defaultPortForHost(host: string): number {
+  return isPrivateNetworkHost(host) ? DEFAULT_GATEWAY_PORT : HTTPS_PORT;
+}
+
+/** Whether the authority part already carries a port, so a missing one is the only thing defaulted. */
+function authorityHasPort(authority: string): boolean {
+  if (authority.startsWith('[')) {
+    const close: number = authority.indexOf(']');
+    return close >= 0 && authority.substring(close + 1).startsWith(':');
+  }
+  return authority.indexOf(':') >= 0;
+}
+
+/**
+ * Parses the manual `host[:port]` field.
+ *
+ * A typed address carries no scheme and often no port, and the missing port cannot default to a
+ * single number: the plugin's LAN listener is 3443 while every supported public tunnel serves 443.
+ * Guessing the LAN port for a tunnel hostname looks exactly like "remote does not work" (the
+ * connection simply times out), so the default follows the entry type. An explicit port is never
+ * rewritten, including the unusual `192.168.1.10:443`.
+ */
+export function parseManualAddress(rawValue: string): GatewayOrigin | undefined {
+  const trimmed: string = rawValue.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  const candidate: string = trimmed.indexOf('://') >= 0 ? trimmed : `https://${trimmed}`;
+  const origin: GatewayOrigin | undefined = parseOrigin(candidate);
+  const split: SplitUrl | undefined = splitUrl(candidate);
+  if (origin === undefined || split === undefined) {
+    return undefined;
+  }
+  if (authorityHasPort(split.authority)) {
+    return origin;
+  }
+  return new GatewayOrigin(origin.host, defaultPortForHost(origin.host));
+}
+
 /** Returns whether an absolute candidate URL has exactly the configured origin. */
 export function isSameOrigin(origin: GatewayOrigin, rawCandidate: string): boolean {
   const split: SplitUrl | undefined = splitUrl(rawCandidate);
@@ -306,10 +346,26 @@ export function isIpv4Literal(host: string): boolean {
   return isValidIpv4(host);
 }
 
+/** Loopback, ULA and link-local IPv6 are reachable only from a local path, never from the internet. */
+function isPrivateIpv6(host: string): boolean {
+  const value: string = host.toLowerCase();
+  if (value === '::1') {
+    return true;
+  }
+  if (value.startsWith('fc') || value.startsWith('fd')) {
+    return true;
+  }
+  return value.startsWith('fe8') || value.startsWith('fe9')
+    || value.startsWith('fea') || value.startsWith('feb');
+}
+
 /** Whether the host is a loopback or private LAN address (used for timeouts and labelling). */
 export function isPrivateNetworkHost(host: string): boolean {
   if (host === 'localhost') {
     return true;
+  }
+  if (host.indexOf(':') >= 0) {
+    return isPrivateIpv6(host);
   }
   if (!isValidIpv4(host)) {
     return false;

@@ -7,12 +7,14 @@
  */
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard, BusinessError } from '@kit.BasicServicesKit';
+import { common } from '@kit.AbilityKit';
 import { Log } from '../common/Log';
 import { Palette, formatRelative } from '../common/Theme';
+import { ScanOutcome, ScanStatus, scanPairingQr } from '../common/Scanner';
 import { DeviceRecord, DeviceStatus } from '../model/DeviceRecord';
 import { AppService, PairingInput, describeFailure, interpretPairingInput, toAuthFailure } from '../service/AppService';
 import { PairingTarget } from '../protocol/PairingKey';
-import { GatewayConnection, GatewayOrigin, isPrivateNetworkHost, parseOrigin } from '../protocol/Origin';
+import { GatewayConnection, GatewayOrigin, isPrivateNetworkHost, parseManualAddress, parseOrigin } from '../protocol/Origin';
 import { GatewayDiscovery, NativeProbe } from '../protocol/GatewayHttp';
 import { BrowserView } from './BrowserView';
 import { SelfCheckResult, runSelfCheck } from '../common/SelfCheck';
@@ -67,6 +69,7 @@ struct Index {
   @State private pairingError: string = '';
   @State private pairingStatus: string = '';
   @State private scanBusy: boolean = false;
+  @State private scanQrBusy: boolean = false;
   @State private discovered: GatewayDiscovery[] = [];
   @State private pairInput: string = '';
   @State private manualHost: string = '';
@@ -141,6 +144,54 @@ struct Index {
     });
   }
 
+  /**
+   * Scans the pairing QR shown by the desktop plugin.
+   *
+   * The QR payload is the pairing link, so a scanned link takes the exact same path as a pasted
+   * one (`interpretPairingInput`): the origin comes from the link and the CA rules are unchanged.
+   * Only a bare key payload still needs an address, which a scan cannot supply.
+   */
+  private scanPairingCode(): void {
+    if (this.scanQrBusy || this.busy) {
+      return;
+    }
+    const context: common.UIAbilityContext | undefined = AppService.get().abilityContext();
+    if (context === undefined) {
+      this.toast('扫码暂不可用，请改用粘贴配对链接');
+      return;
+    }
+    this.pairingError = '';
+    this.scanQrBusy = true;
+    scanPairingQr(context).then((outcome: ScanOutcome) => {
+      this.scanQrBusy = false;
+      if (outcome.status === ScanStatus.CANCELLED) {
+        // Backing out of the system scanning UI is not an error worth a message.
+        return;
+      }
+      if (outcome.status !== ScanStatus.SCANNED) {
+        this.pairingError = '扫码没有成功，请改用「从剪贴板粘贴」';
+        return;
+      }
+      const parsed: PairingInput = interpretPairingInput(outcome.text);
+      if (parsed.key === undefined) {
+        this.pairingError = parsed.error;
+        return;
+      }
+      this.pairInput = outcome.text;
+      if (parsed.target === undefined) {
+        this.pairingError = '二维码里只有配对密钥，请再选择电脑或填写地址';
+        return;
+      }
+      this.toast('已识别配对二维码');
+      // The link carries its origin, so pairing can continue without another tap: the code is
+      // short-lived and every extra step risks an expired pairing code.
+      this.startPairing();
+    }).catch(() => {
+      this.scanQrBusy = false;
+      this.pairingError = '扫码没有成功，请改用「从剪贴板粘贴」';
+    });
+  }
+
   private scanLan(): void {
     if (this.scanBusy) {
       return;
@@ -189,11 +240,14 @@ struct Index {
           return;
         }
       } else if (this.manualHost.trim().length > 0) {
-        const host: string = this.manualHost.trim();
-        originText = host.startsWith('https://') ? host : `https://${host}`;
-        if (originText.indexOf(':', 'https://'.length) < 0) {
-          originText = `${originText}:3443`;
+        // The field accepts `host` or `host:port`; a missing port follows the entry type (3443 LAN,
+        // 443 public), because appending the LAN port to a tunnel hostname only times out.
+        const manual: GatewayOrigin | undefined = parseManualAddress(this.manualHost);
+        if (manual === undefined) {
+          this.pairingError = '电脑地址格式不正确';
+          return;
         }
+        originText = manual.serialized();
       } else {
         this.pairingError = '请先扫描局域网并选择一台电脑，或填写电脑地址';
         return;
@@ -395,7 +449,7 @@ struct Index {
         .fontSize(17)
         .fontColor(Palette.textPrimary)
         .fontWeight(FontWeight.Medium)
-      Text('先在电脑的 DeepSeek Harness 中启用「移动访问」并生成配对链接，\n再用手机粘贴链接或扫描局域网完成配对。')
+      Text('先在电脑的 DeepSeek Harness 中启用「移动访问」并生成配对二维码，\n再用手机扫码（或粘贴链接）完成配对。')
         .fontSize(13)
         .fontColor(Palette.textSecondary)
         .textAlign(TextAlign.Center)
@@ -515,7 +569,7 @@ struct Index {
           .onClick(() => {
             this.view = ViewName.LIST;
           })
-        this.titleBlock('添加电脑', '粘贴配对链接或扫描局域网')
+        this.titleBlock('添加电脑', '扫码、粘贴链接或扫描局域网')
         Blank()
       }
       .width('100%')
@@ -524,10 +578,10 @@ struct Index {
       Scroll() {
         Column({ space: 18 }) {
           Column({ space: 6 }) {
-            Text('1. 在电脑端生成配对链接')
+            Text('1. 在电脑端生成配对二维码')
               .fontSize(13)
               .fontColor(Palette.textSecondary)
-            Text('DeepSeek Harness → 移动访问 → 复制配对链接（或生成配对二维码）。局域网场景请让手机与电脑连同一个 Wi-Fi。')
+            Text('DeepSeek Harness → 移动访问 → 生成配对二维码（或复制配对链接）。扫码时让二维码留在电脑屏幕上；局域网场景请让手机与电脑连同一个 Wi-Fi。')
               .fontSize(12)
               .fontColor(Palette.textMuted)
               .lineHeight(18)
@@ -536,7 +590,7 @@ struct Index {
           .width('100%')
 
           Column({ space: 10 }) {
-            Text('2. 粘贴配对链接或密钥')
+            Text('2. 扫码，或粘贴配对链接 / 裸密钥')
               .fontSize(13)
               .fontColor(Palette.textSecondary)
             TextArea({ text: this.pairInput, placeholder: 'https://192.168.1.10:3443/mobile-access/pair#key=dsh2.…' })
@@ -551,13 +605,26 @@ struct Index {
                 this.pairInput = value;
                 this.pairingError = '';
               })
-            Button('从剪贴板粘贴')
-              .fontSize(13)
-              .height(36)
-              .backgroundColor(Palette.surfaceRaised)
-              .fontColor(Palette.textPrimary)
-              .borderRadius(10)
-              .onClick(() => this.readClipboard())
+            Row({ space: 10 }) {
+              Button(this.scanQrBusy ? '正在扫码…' : '扫一扫二维码')
+                .fontSize(13)
+                .height(36)
+                .layoutWeight(1)
+                .backgroundColor(this.scanQrBusy || this.busy ? Palette.accentSoft : Palette.accent)
+                .fontColor(Palette.onAccent)
+                .borderRadius(10)
+                .enabled(!this.scanQrBusy && !this.busy)
+                .onClick(() => this.scanPairingCode())
+              Button('从剪贴板粘贴')
+                .fontSize(13)
+                .height(36)
+                .layoutWeight(1)
+                .backgroundColor(Palette.surfaceRaised)
+                .fontColor(Palette.textPrimary)
+                .borderRadius(10)
+                .onClick(() => this.readClipboard())
+            }
+            .width('100%')
           }
           .alignItems(HorizontalAlign.Start)
           .width('100%')

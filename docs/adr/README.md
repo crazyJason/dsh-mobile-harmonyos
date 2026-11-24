@@ -10,6 +10,7 @@
 | [0003](0003-device-credential-in-asset-store.md) | 设备凭据存 Asset Store Kit，元数据存 preferences | `model/DeviceStore.ets` |
 | [0004](0004-repo-name-and-bundle-namespace.md) | 仓库名与 `bundleName` 的命名空间 | `AppScope/app.json5` |
 | [0005](0005-native-rewrite-not-shell.md) | 原生 ArkTS 重写，而不是套壳 WebView / 复用 Android 客户端 | `entry/src/main/ets/` |
+| [0006](0006-scan-with-system-scankit-ui.md) | 扫码用系统 Scan Kit 默认界面，不自绘取景器、不申请相机权限 | `common/Scanner.ets`、`pages/Index.ets` |
 
 编号一旦占用就不复用；若两篇撞号，后者顺延到下一个空号（0005 即由此而来）。
 

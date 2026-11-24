@@ -11,7 +11,7 @@ import { GatewayClient, GatewayDiscovery, GatewayMetadata, NativeProbe, NativeSe
 import { AuthFailure, AuthFailureKind } from '../protocol/AuthFailure';
 import { DeviceRecord, DeviceStatus, AccessMode, caPemToDer } from '../model/DeviceRecord';
 import { DeviceStore } from '../model/DeviceStore';
-import { GatewayOrigin, parseConnection } from '../protocol/Origin';
+import { GatewayOrigin, isPrivateNetworkHost, parseConnection } from '../protocol/Origin';
 import { derToPem, sha256Hex } from '../protocol/CertPin';
 import { LanDiscovery } from '../protocol/Discovery';
 import { fetchServedCertificate } from '../protocol/TlsHttp';
@@ -105,10 +105,9 @@ export function interpretPairingInput(rawValue: string): PairingInput {
       return new PairingInput(undefined, connection.origin, undefined,
         '链接里没有有效的配对密钥，请在电脑端重新生成配对链接');
     }
-    const remote: boolean = !(connection.origin.host.startsWith('192.168.')
-      || connection.origin.host.startsWith('10.')
-      || connection.origin.host.startsWith('172.16.')
-      || connection.origin.host.startsWith('127.'));
+    // One classification rule for the whole client (PROTOCOL §3.4): timeouts, the list label and the
+    // "private entry must serve its CA" rule must not disagree with each other.
+    const remote: boolean = !isPrivateNetworkHost(connection.origin.host);
     return new PairingInput(new PairingTarget(connection, key, remote), connection.origin, key, '');
   }
   const key: PairingKey | undefined = parsePairingKey(text);

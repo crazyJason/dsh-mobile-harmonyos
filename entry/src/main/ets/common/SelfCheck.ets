@@ -5,9 +5,12 @@
  * proves the installed build enforces the same protocol contract as the desktop plugin without
  * needing a reachable computer, which makes "it installs but misbehaves" diagnosable.
  */
-import { parseConnection, parseOrigin, isSameOrigin, isPinnedAuthority } from '../protocol/Origin';
-import { parsePairingKey, pairingKeyFromUrl, preserveRemotePin } from '../protocol/PairingKey';
+import {
+  parseConnection, parseOrigin, isSameOrigin, isPinnedAuthority, isPrivateNetworkHost, parseManualAddress
+} from '../protocol/Origin';
+import { PairingTarget, parsePairingKey, pairingKeyFromUrl, preserveRemotePin } from '../protocol/PairingKey';
 import { parseAsn1Time } from '../protocol/CertPin';
+import { PairingInput, interpretPairingInput } from '../service/AppService';
 
 export class SelfCheckResult {
   readonly passed: string[];
@@ -49,6 +52,17 @@ export function runSelfCheck(): SelfCheckResult {
     && isSameOrigin(origin, 'https://192.168.1.20:3444/api') === false, result);
   check('wss 与 https 同授权', origin !== undefined && isPinnedAuthority(origin, 'wss://192.168.1.20:3443/api') === true, result);
 
+  // The manual field has no scheme and often no port. Defaulting a tunnel hostname to the LAN port
+  // is the failure mode that looks like "remote is broken" (it just times out), and the entry-type
+  // split it follows also decides timeouts and whether a missing CA is fatal, so both are exercised.
+  check('公网主机名默认 443', parseManualAddress('dsh.example.com')?.port === 443, result);
+  check('局域网地址默认 3443', parseManualAddress('192.168.1.10')?.port === 3443, result);
+  check('显式端口不被改写', parseManualAddress('192.168.1.10:443')?.port === 443, result);
+  check('172.20 与 100.64 属于局域网',
+    isPrivateNetworkHost('172.20.1.5') && isPrivateNetworkHost('100.64.0.7'), result);
+  check('IPv6 私网属于局域网', isPrivateNetworkHost('::1') && isPrivateNetworkHost('fd00::1'), result);
+  check('公网主机名属于远程', !isPrivateNetworkHost('dsh.example.com'), result);
+
   const dsh2Key = `dsh2.${INSTANCE}.${TOKEN}`;
   const dsh1Key = `dsh1.${INSTANCE}.${TOKEN}`;
   check('解析 dsh2 密钥并要求 CA', parsePairingKey(dsh2Key)?.requiresCa === true, result);
@@ -66,6 +80,19 @@ export function runSelfCheck(): SelfCheckResult {
   check('兼容旧版配对片段', legacyConnection !== undefined, result);
   check('拒绝非配对路径的链接',
     parseConnection(`https://192.168.1.20:3443/other#key=${dsh2Key}`) === undefined, result);
+
+  // Scanning feeds the same resolver as pasting (PROTOCOL §3.4, ADR-0006): a scanned link already
+  // carries its origin, a scanned bare key still needs an address, and the LAN/REMOTE label must
+  // follow the origin instead of the input channel.
+  const scannedLan: PairingInput = interpretPairingInput(`https://192.168.1.20:3443/mobile-access/pair#key=${dsh2Key}`);
+  const scannedLanTarget: PairingTarget | undefined = scannedLan.target;
+  check('扫码完整链接可直接配对', scannedLanTarget !== undefined && !scannedLanTarget.remote, result);
+  const scannedRemote: PairingInput =
+    interpretPairingInput(`https://dsh.example.com/mobile-access/pair#instance=${INSTANCE}&token=${TOKEN}`);
+  const scannedRemoteTarget: PairingTarget | undefined = scannedRemote.target;
+  check('扫码隧道链接判为远程', scannedRemoteTarget !== undefined && scannedRemoteTarget.remote, result);
+  const scannedKeyOnly: PairingInput = interpretPairingInput(dsh1Key);
+  check('扫码裸密钥仍要求地址', scannedKeyOnly.key !== undefined && scannedKeyOnly.target === undefined, result);
 
   // Certificate validity timestamps are ASN.1 time, not ISO-8601: a wrong format silently
   // rejects every LAN pairing, so the parser is exercised here.

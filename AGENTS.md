@@ -38,7 +38,7 @@ pwsh -File scripts/verify.ps1 -SkipBuild
 | `entry/src/main/ets/model/` | 设备记录模型与持久化（preferences 存元数据，Asset Store 存凭据） | `docs/ARCHITECTURE.md` §6 |
 | `entry/src/main/ets/service/` | 应用服务层：配对/续期/设备列表协调 | `docs/ARCHITECTURE.md` §5 |
 | `entry/src/main/ets/pages/` | ArkUI 页面与 ArkWeb 容器 | `docs/ARCHITECTURE.md` §7 |
-| `entry/src/main/ets/common/` | 日志、JSON、主题、设备端自检 | — |
+| `entry/src/main/ets/common/` | 日志、JSON、主题、设备端自检、扫码输入通道 | — |
 | `AppScope/app.json5` | `bundleName`、版本、应用名 | ADR-0004 |
 | `entry/src/main/module.json5` | ability、页面入口、权限 | — |
 | `docs/` | BUILD / PROTOCOL / ARCHITECTURE / TESTING / ADR | 改行为的前提 |
@@ -71,11 +71,12 @@ pwsh -File scripts/verify.ps1 -SkipBuild
 | --- | --- |
 | 命令行构建 | ✅ 已验证（Windows 11 / DevEco Studio 26.0.0 / SDK API 26 / hvigor 6.26.9 / JDK 17） |
 | 真机安装 | ✅ 已验证（2026-11-24，HUAWEI Mate 60 Pro+ / HarmonyOS 7.0.0.111 / API 26，DevEco 自动签名的 debug Profile；见 `docs/BUILD.md` §8.1）。**不带签名配置的命令行构建产物仍是 unsigned，装不上** |
-| 真机启动 / 协议自检 | ✅ TC-01、TC-02 通过（自检 24 项全过，含 4 条远程降级保护规则）；真机上发现并修复 7 个缺陷（全角加号字形、底部导航条白条、弹窗浅色、启动日志不可见、CA 基本约束误拒、撤销归类、TLS 错误码错判），见 `docs/TESTING.md` §11 |
+| 真机启动 / 协议自检 | ✅ TC-01、TC-02 通过（2026-11-24，最新构建自检 **33 项**全过：24 条协议规则 + 6 条入口分类/缺省端口 + 3 条扫码头；早期 24 项构建同轮通过）；真机上发现并修复 7 个缺陷（全角加号字形、底部导航条白条、弹窗浅色、启动日志不可见、CA 基本约束误拒、撤销归类、TLS 错误码错判），见 `docs/TESTING.md` §11 |
 | 局域网配对 / TLS 固定 / 浏览 | ✅ 已验证（2026-11-24）：电脑端装 `dsh-mobile@0.8.15` 后完成局域网配对（`dsh2` 密钥 + CA 固定）、ArkWeb 登录浏览 DSH 主页、进程重启后恢复、电脑端设备列表可见；详见 `docs/TESTING.md` §11.2 |
-| 失败路径 / 网络切换 / 远程入口 | ✅ 大部分已验证（2026-11-24 第三轮）：错误/重复/过期配对码、撤销设备、来源地址变化、网关不可达、非法输入、证书不匹配、会话丢失后续期、Wi-Fi↔移动网络切换、前后台切换全部在真机执行；**未执行**：设备上限（TC-13）、受信网段的网关侧策略（TC-15 客户端侧已用桩验证）、公网证书/FRP 远程入口（TC-16/17，无域名隧道） |
+| 失败路径 / 网络切换 / 远程入口 | ✅ 大部分已验证（2026-11-24 第三、四轮）：错误/重复/过期配对码、撤销设备、来源地址变化、网关不可达、非法输入、证书不匹配、会话丢失后续期、Wi-Fi↔移动网络切换、前后台切换全部在真机执行；**第四轮新增**：cloudflared 快速隧道公网证书入口在蜂窝网络下完成配对 + ArkWeb 浏览（TC-16B PASS，见 `docs/TESTING.md` §11.6）；**未执行**：设备上限（TC-13）、受信网段的网关侧策略（TC-15 客户端侧已用桩验证）、命名隧道（TC-16）与自签 FRP（TC-17）远程入口 |
+| 扫码配对 | ✅ 已验证（2026-11-24 第五轮）：系统 Scan Kit 默认界面拉起（**无相机权限弹窗**，带手电筒/图库）、扫局域网二维码（CA 固定）与扫远程二维码（系统信任库）都直接配对成功并落到列表、重启后两条记录仍在、取消路径无错误文案、自检 3 条扫码头通过（TC-32/33/34 PASS，见 `docs/TESTING.md` §11.7） |
 | 自动化测试 | ❌ 无 `ohosTest`；唯一的自动检查是 `scripts/verify.ps1` |
-| 已知安全缺口 | **远程降级保护已接线**（`preserveRemotePin` 于 2026-11-24 接入 `AppService.pair()`，由设备端自检 4 条覆盖；TC-18B 端到端仍需公网证书入口）。其余已知限制（Cookie 残留、无原生桥、无推送等）见 [ARCHITECTURE §15](docs/ARCHITECTURE.md#15-已知缺口与后续工作) |
+| 已知安全缺口 | **远程降级保护已接线**（`preserveRemotePin` 于 2026-11-24 接入 `AppService.pair()`，由设备端自检 4 条覆盖；TC-18B 端到端仍需一台**已固定 CA 的自签远程入口**（`dsh2`/FRP），快速隧道公网证书入口不满足该前置）。其余已知限制（Cookie 残留、无原生桥、无推送等）见 [ARCHITECTURE §15](docs/ARCHITECTURE.md#15-已知缺口与后续工作) |
 | 依赖 | 无第三方 ohpm 依赖，不需要联网 `ohpm install` |
 
 **日志与签名的两条真机结论（都踩过）**：
@@ -127,5 +128,5 @@ build: 固定 hvigor 版本
 | [`docs/BUILD.md`](docs/BUILD.md) | 环境、构建、签名、安装、常见构建错误 |
 | [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | **改任何协议相关代码之前必读**：URL、接口、字段、Cookie、错误码 |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 模块划分、线程与生命周期、证书固定设计、与 Android 对照 |
-| [`docs/TESTING.md`](docs/TESTING.md) | 真机验证：35 条用例（TC-01…TC-31，含 B 变体）、分级执行顺序、缺陷采集要求 |
+| [`docs/TESTING.md`](docs/TESTING.md) | 真机验证：38 条用例（TC-01…TC-34，含 B 变体）、分级执行顺序、缺陷采集要求 |
 | [`docs/adr/`](docs/adr/README.md) | 已定型的架构决策与「为什么不能那样改」 |

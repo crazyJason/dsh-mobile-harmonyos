@@ -2,15 +2,17 @@
 
 面向 [DeepSeek Harness](https://github.com/saya-ch/dsh-mobile) 社区插件 **dsh-mobile** 的 HarmonyOS NEXT（ArkTS / ArkUI）原生手机客户端。它复刻上游 Android 客户端的配对与浏览能力，让 HarmonyOS 手机可以连接运行着 DeepSeek Harness + dsh-mobile 插件的电脑。
 
-> **English summary.** `dsh-mobile-harmonyos` is a native HarmonyOS NEXT (ArkTS/ArkUI) client for the community DeepSeek Harness plugin [`dsh-mobile`](https://github.com/saya-ch/dsh-mobile). The upstream project ships an Android WebView shell that cannot be installed on HarmonyOS NEXT, because HarmonyOS NEXT no longer runs Android APKs. This project reimplements the phone-side client natively: it parses the plugin's one-time pairing link, pins the gateway's self-signed pairing CA against the SHA-256 `instanceId` carried in that link, calls the plugin's `native-pair` / `native-renew` / `native-probe` control endpoints over a hand-written `TLSSocket` HTTP/1.1 client, stores the long-lived device credential in the Asset Store Kit, and loads the DSH mobile page in an ArkWeb container with the paired session cookies installed. The project has been compiled into a HAP on the development machine described below and, as of 2026-11-24, installed and paired on a real HarmonyOS 7 phone: LAN pairing against a pinned self-signed CA, the ArkWeb session, recovery after a process restart, and the main failure paths (expired/reused/wrong pairing codes, revocation, unreachable gateway, impostor certificate, Wi-Fi↔cellular switch, background/foreground, session loss) all behave as documented. Device limits, rate limiting, untrusted-CIDR 403 and public-CA/FRP remote entries remain untested.
+> **English summary.** `dsh-mobile-harmonyos` is a native HarmonyOS NEXT (ArkTS/ArkUI) client for the community DeepSeek Harness plugin [`dsh-mobile`](https://github.com/saya-ch/dsh-mobile). The upstream project ships an Android WebView shell that cannot be installed on HarmonyOS NEXT, because HarmonyOS NEXT no longer runs Android APKs. This project reimplements the phone-side client natively: it parses the plugin's one-time pairing link, pins the gateway's self-signed pairing CA against the SHA-256 `instanceId` carried in that link, calls the plugin's `native-pair` / `native-renew` / `native-probe` control endpoints over a hand-written `TLSSocket` HTTP/1.1 client, stores the long-lived device credential in the Asset Store Kit, and loads the DSH mobile page in an ArkWeb container with the paired session cookies installed. The project has been compiled into a HAP on the development machine described below and, as of 2026-11-24, installed and paired on a real HarmonyOS 7 phone: LAN pairing against a pinned self-signed CA, the ArkWeb session, recovery after a process restart, and the main failure paths (expired/reused/wrong pairing codes, revocation, unreachable gateway, impostor certificate, Wi-Fi↔cellular switch, background/foreground, session loss) all behave as documented. Device limits, untrusted-CIDR 403 and named-tunnel/self-signed-FRP remote entries remain untested; a public-CA quick-tunnel (Cloudflare) remote entry was verified end to end on cellular on 2026-11-24. Pairing can also be started by scanning the plugin's pairing QR through the system Scan Kit UI (the app still declares no camera permission); on 2026-11-24 both a LAN QR (pinned self-signed CA) and a remote QR (system trust store) paired successfully straight from a scan.
 
 > **项目状态**
 >
 > - ✅ 已在本机（DevEco Studio 26.0.0 / HarmonyOS SDK API 26 / hvigor 6.26.9 / JDK 17）用命令行完整编译，产物为 `entry/build/default/outputs/default/entry-default-unsigned.hap`。
 > - ✅ 已在真机安装并跑通局域网主流程（2026-11-24，HUAWEI Mate 60 Pro+ / HarmonyOS 7.0.0.111 / API 26）：DevEco 自动签名 → 安装 → 局域网配对（`dsh2` 密钥 + 自签 CA 固定）→ ArkWeb 登录浏览 DSH 主页 → 进程重启后恢复。
 > - ✅ 已在真机跑通失败路径与生命周期（同轮）：错误/重复/过期配对码、撤销设备、网关不可达、非法输入、证书不匹配、局域网无 `ca.cer` 硬失败、Wi-Fi↔移动网络切换、前后台切换、会话丢失后续期。
+> - ✅ 已在真机跑通**远程通道**（2026-11-24 第四轮）：电脑端 cloudflared 快速隧道（公网证书入口）+ 手机仅蜂窝 → 粘贴配对链接 → 系统信任库配对 → ArkWeb 加载 DSH 主页；远程记录与局域网记录并存。证据见 [docs/TESTING.md §11.6](docs/TESTING.md#116-2026-11-24-第四轮cloudflared-快速隧道远程通道tc-16b)。
+> - ✅ **扫码配对已端到端跑通**（2026-11-24 第五轮）：系统 Scan Kit 默认界面在真机拉起（**无相机权限弹窗**，带手电筒与图库入口）；扫局域网二维码走 CA 固定、扫远程二维码走系统信任库，两条都直接配对成功并在列表可见；取消路径无错误文案；重启后记录仍在；自检 33 项全过。证据见 [docs/TESTING.md §11.7](docs/TESTING.md#117-2026-11-24-第五轮扫码通道接入tc-32tc-34)。
 > - ⛔ 未签名 HAP 无法安装到真机；签名需要 DevEco Studio 自动签名（登录华为账号）或自备签名材料。
-> - ⛔ **仍未执行**：设备上限、受信网段的网关侧策略（客户端侧已用桩验证 403 文案）、公网证书/FRP 远程入口、端到端远程降级（规则已由设备端自检覆盖）。执行记录见 [docs/TESTING.md](docs/TESTING.md#11-执行记录2026-11-24-第一轮)。
+> - ⛔ **仍未执行**：设备上限、受信网段的网关侧策略（客户端侧已用桩验证 403 文案）、命名隧道（TC-16）与自签 FRP（TC-17）远程入口、端到端远程降级（规则已由设备端自检覆盖）。执行记录见 [docs/TESTING.md](docs/TESTING.md#11-执行记录2026-11-24-第一轮)。
 > - 上游是协议的事实来源（source of truth），本项目与它的对应关系见 [docs/PROTOCOL.md](docs/PROTOCOL.md)。
 
 ---
@@ -47,13 +49,13 @@
 | 已配对设备管理 | 元数据存 `@ohos.data.preferences`，设备凭据存 **Asset Store Kit**，列表、重命名、删除 |
 | 网页浏览 | ArkWeb 容器加载已配对 origin 的 DSH 移动端页面，注入 `dsh_ma_*` 会话 Cookie |
 | 失败分类 | 401/403、409、429、`device_revoked` / `device_expired` / `source_network_untrusted` 等给出可读提示 |
-| 设备端协议自检 | 空列表可运行「协议自检」：校验 origin 解析/拒绝、`dsh1`/`dsh2` 密钥、配对 URL 与 legacy 片段、同源 vs `wss:` 固定 authority、ASN.1 证书有效期解析；用于确认安装的构建与协议文档一致 |
+| 设备端协议自检 | 空列表可运行「协议自检」（**33 项**）：校验 origin 解析/拒绝、`dsh1`/`dsh2` 密钥、配对 URL 与 legacy 片段、同源 vs `wss:` 固定 authority、ASN.1 证书有效期解析、手填地址缺省端口、扫码头分类；用于确认安装的构建与协议文档一致 |
+| 扫码配对 | 「添加电脑」→「扫一扫二维码」调用**系统扫码界面**（Scan Kit 默认 UI），扫电脑端插件生成的配对二维码；扫到的链接与粘贴的完全等价，走同一个 `interpretPairingInput`。**不申请相机权限**：相机预览在系统进程内（见 [ADR-0006](docs/adr/0006-scan-with-system-scankit-ui.md)） |
 
 **未实现（有意延后或受平台限制）**
 
 | 限制 | 影响 |
 | --- | --- |
-| 无原生扫码 | 需要把电脑上显示的配对链接/密钥**复制/粘贴**到手机；未申请相机权限（manifest 只声明 `INTERNET` / `GET_NETWORK_INFO`），扫码 UI 未实现 |
 | 无原生桥 `window.dshMobileNative` | 页面按上游支持的“浏览器模式”运行；原生能力相关 UI（原生分享、文件选择等）不可用 |
 | 无推送 | 没有 `mobile-push` 注册，后台任务完成/需要确认时不会收到系统通知 |
 | 无 iroh 传输 | 仅支持 HTTPS 直连（局域网 / 自签名 FRP / 公网证书入口），不支持 iroh 点对点通道 |
@@ -65,7 +67,7 @@
 | 上游 Android（`apps/mobile/android/.../io/github/sayach/dshmobile/`） | 本项目 HarmonyOS | 说明 |
 | --- | --- | --- |
 | `GatewayUrlPolicy.kt`（`GatewayOrigin`、`GatewayConnection`） | `protocol/Origin.ets` | HTTPS origin 解析、配对 URL 解析、同源与固定 authority 判定 |
-| `PairingTrust.kt`、`PairingScanPolicy.kt` | `protocol/PairingKey.ets` | 配对 key 解析、`dsh2` 必须带 CA、`preserveRemotePin` 降级保护（已实现，尚未接入配对流程） |
+| `PairingTrust.kt`、`PairingScanPolicy.kt` | `protocol/PairingKey.ets` + `protocol/Origin.ets` | 配对 key 解析、`dsh2` 必须带 CA、`preserveRemotePin` 降级保护（已接入 `AppService.pair()`）。LAN/REMOTE 由 `isPrivateNetworkHost` 一条规则判定；上游另有「用户选择的模式 + 隧道厂商后缀」细分（未复刻） |
 | `PairingTrust.kt`、`PinnedTls.kt`（证书部分） | `protocol/CertPin.ets` | DER↔PEM、SHA-256 指纹、配对 CA 校验、服务端证书链校验 |
 | `NativeAuthClient.kt` | `protocol/GatewayHttp.ets` | `discovery` / `ca.cer` / `metadata` / `native-pair` / `native-renew` / `native-probe` |
 | `PinnedTls.kt`（OkHttp / `SSLSocketFactory`） | `protocol/TlsHttp.ets` | 基于 `TLSSocket` 的手写 HTTPS/1.1 客户端，按请求传入固定 CA |
@@ -73,7 +75,7 @@
 | `PairedDeviceStore.kt`、`DeviceCredentialStore.kt` | `model/DeviceRecord.ets` + `model/DeviceStore.ets` | 设备记录模型；preferences 存元数据，系统密钥库（Asset Store）存凭据 |
 | `MainActivity.kt`（WebView 外壳） | `pages/`（设备列表、添加设备、ArkWeb 容器） | 页面容器、SSL 错误续接、会话 Cookie 注入 |
 | `NativeBridge.kt`、`NativeBridgePolicy.kt` | **未实现** | 页面检测不到 `window.dshMobileNative`，按浏览器模式运行 |
-| `QrDecoder.kt`、`ScanActivity.kt` | **未实现** | 无扫码入口，改为粘贴配对链接或裸密钥 |
+| `QrDecoder.kt`、`ScanActivity.kt` | `common/Scanner.ets` | 上游自研扫码页（Camera1 + ZXing，需要相机权限）；本项目调用**系统** Scan Kit 默认界面，扫到后复用同一个解析函数，因此不申请相机权限、不引入第三方依赖（[ADR-0006](docs/adr/0006-scan-with-system-scankit-ui.md)） |
 
 更完整的模块级说明见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
@@ -165,7 +167,7 @@ hdc install -r entry\build\default\outputs\default\entry-default-signed.hap
 
 前置条件：手机开启「开发者模式」与「USB 调试」，并在弹窗中允许该电脑调试；`hdc` 来自 `D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe`（或 DevEco Studio 自带的 sdk toolchains 目录）。
 
-安装后的冒烟检查：先打开 App，在空设备列表点击「运行协议自检」，**期望全部通过**；未通过时先不要进入配对流程（见 [docs/TESTING.md](docs/TESTING.md) 的 TC-02）。
+安装后的冒烟检查：先打开 App，在空设备列表点击「运行协议自检」，**期望 33 项全部通过**；未通过时先不要进入配对流程（见 [docs/TESTING.md](docs/TESTING.md) 的 TC-02）。
 
 ## 配对使用流程
 
@@ -175,10 +177,10 @@ hdc install -r entry\build\default\outputs\default\entry-default-signed.hap
    `https://<host>:3443/mobile-access/pair#key=dsh2.<64位十六进制>.<43位token>` 的链接（自签 CA 入口），
    或 `https://<host>:3443/mobile-access/pair#instance=<64位十六进制>&token=<43位token>`（局域网 / 公网证书 / 旧版插件）。
    上游**不会**生成 `#key=dsh1...` 片段；`dsh1.<...>` 是插件返回的 appKey 形式，可作为裸密钥使用。
-2. **把链接复制到手机。** 当前版本没有原生扫码：用聊天工具/剪贴板把整条链接发到手机并复制。
-3. **在 App 里粘贴并配对。**
-   - 粘贴**完整链接**：App 直接从链接得到 origin 与配对 key；
-   - 只粘贴**裸密钥**（`dsh2.*` 或 `dsh1.*`）：先点「扫描局域网」选中对应电脑，或在「手动填写」输入 `host:port`（未写端口时补默认 3443）；App 用该地址与裸密钥组成配对目标，并校验扫描结果的 `instanceId` 与密钥一致；
+2. **在手机上扫码（推荐）或把链接复制到手机。** 点电脑端面板的「生成配对二维码」，App「添加电脑」→「扫一扫二维码」，把手机对准屏幕即可；系统扫码界面自带手电筒与图库入口。没有第二个设备/不方便扫码时，也可以把整条链接用聊天工具发到手机再复制。
+3. **在 App 里配对。**
+   - **扫到或粘贴完整链接**：App 直接从链接得到 origin 与配对 key，扫到后**自动开始配对**（配对码默认只有 120 秒，少一次点击少一次过期）；
+   - 只粘贴**裸密钥**（`dsh2.*` 或 `dsh1.*`）：先点「扫描局域网」选中对应电脑，或在「手动填写」输入地址（不带端口时按入口类型补默认端口：局域网 `3443`、公网隧道/域名 `443`；显式写出的端口不改写）；App 用该地址与裸密钥组成配对目标，并校验扫描结果的 `instanceId` 与密钥一致；
    - 对**公网证书远程入口**使用 `dsh1` 裸密钥 + 地址：`/mobile-access/ca.cer` 返回 404 时改用平台信任库；局域网/私网入口即使 404 也必须失败（自签入口必须提供并通过指纹校验）。
 
    App 随后会：
@@ -211,8 +213,8 @@ hdc install -r entry\build\default\outputs\default\entry-default-signed.hap
 
 ## 已知限制
 
-1. **真机验收覆盖局域网主流程与失败路径**：2026-11-24 已在真机上跑通安装、配对、浏览、重启恢复、撤销、过期码、网关不可达、证书不匹配、换网与前后台切换；设备上限、受信网段的网关侧策略与公网证书/FRP 远程入口仍未验证（见 [docs/TESTING.md](docs/TESTING.md#11-执行记录2026-11-24-第一轮)）。
-2. **无原生扫码**：必须复制/粘贴配对链接或裸密钥；**未申请相机权限**（`module.json5` 只声明 `INTERNET` / `GET_NETWORK_INFO`），扫码 UI 未实现。
+1. **真机验收覆盖局域网主流程与失败路径**：2026-11-24 已在真机上跑通安装、配对、浏览、重启恢复、撤销、过期码、网关不可达、证书不匹配、换网与前后台切换，以及公网证书快速隧道远程通道；设备上限、受信网段的网关侧策略、命名隧道与自签 FRP 远程入口仍未验证（见 [docs/TESTING.md](docs/TESTING.md#11-执行记录2026-11-24-第一轮)）。
+2. **扫码依赖系统 Scan Kit**：用系统扫码界面（相机预览在系统进程，应用**不申请相机权限**），因此界面外观不可定制；设备缺少 HMS Scan 服务时扫码不可用，此时用「从剪贴板粘贴」。扫码结果与粘贴的链接完全等价，配对失败时仍按 [docs/TESTING.md](docs/TESTING.md) 的 TC-32…TC-34 排查。
 3. **无推送**：没有 `mobile-push` 注册，后台任务完成/需要确认时不会收到系统通知。
 4. **无 iroh**：上游 Android 的 iroh 点对点传输未移植；仅支持 HTTPS 直连入口（局域网、自签名 FRP、公网证书）。
 5. **无 `window.dshMobileNative`**：页面运行在上游的浏览器模式，依赖原生能力的增强功能不可用。
@@ -227,6 +229,8 @@ hdc install -r entry\build\default\outputs\default\entry-default-signed.hap
 | 现象 | 可能原因 | 处理 |
 | --- | --- | --- |
 | 粘贴链接后提示格式错误 | 链接被截断、被聊天工具改写成 `http`、端口缺失或片段丢失 | 复制完整链接，确认是 `https://.../mobile-access/pair#...`；可由电脑重新生成配对码 |
+| 扫码后提示「扫码没有成功」 | 设备没有可用的 HMS Scan 服务，或系统扫码界面被中途打断 | 改用「从剪贴板粘贴」；确认系统扫码本身可用（相机预览、手电筒正常） |
+| 扫到二维码却提示「配对码已失效」 | 二维码超过有效期（默认 120 秒），或扫的是另一通道的码（远程/局域网通道的配对码不通用） | 在同一个通道上重新生成二维码后立刻扫 |
 | 提示证书/指纹不匹配 | 电脑换了配对 CA、链接来自另一台电脑、或中间人替换 | **不要**重试忽略；在电脑上重新生成配对链接后重新配对 |
 | `dsh2` 链接提示缺少 CA（404） | 入口不是自签 CA 模式（公网证书入口才会 404），或端口指向了错误的网关 | 确认电脑上插件的入口类型；公网证书入口用 `dsh1` 裸密钥 + 地址配对，或直接粘贴插件生成的 `#instance=...&token=...` 链接 |
 | `HTTP 401/403` | 配对码已过期/已被使用，或设备被吊销 | 在电脑上重新生成配对码；若设备列表里已无此设备，先删除本地记录再配对 |
