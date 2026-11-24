@@ -2,7 +2,7 @@
 
 本文说明如何在本机把 `dsh-mobile-harmonyos` 编译成 HAP、如何签名，以及如何安装到 HarmonyOS NEXT 真机。
 
-> **验证范围**：本文的命令行构建流程已在本机（Windows + DevEco Studio 26.0.0 + HarmonyOS SDK API 26 + hvigor 6.26.9 + JDK 17）实际执行并成功产出 HAP。**安装、启动、配对、浏览均未在真机上验收**；签名与安装章节基于 HarmonyOS 的通用要求，未经本项目实测。
+> **验证范围**：本文的命令行构建流程已在本机（Windows + DevEco Studio 26.0.0 + HarmonyOS SDK API 26 + hvigor 6.26.9 + JDK 17）实际执行并成功产出 HAP。2026-11-24 已在真机上验收：DevEco 自动签名 → 安装 → 启动与协议自检（24 项）→ 局域网配对（含自签 CA 固定）→ ArkWeb 浏览 → 进程重启后恢复，记录见 [8.1](#81-真机侧记录)；配对失败路径、网络切换与生命周期用例的证据见 [TESTING.md §11](TESTING.md#11-执行记录2026-11-24-第一轮)。**未实测**：手动配置自有证书/Profile 的签名方式、公网证书/FRP 远程入口。
 
 - [1. 环境要求](#1-环境要求)
 - [2. 工程结构与产物](#2-工程结构与产物)
@@ -134,7 +134,7 @@ Remove-Item -Recurse -Force '.hvigor\cache'
 
 - `scripts/build.ps1`：自动探测 DevEco Studio / SDK / Node / JDK（也可用 `DEVECO_STUDIO_HOME`、`DEVECO_SDK_HOME`、`NODE_HOME`、`JAVA_HOME` 覆盖），执行与 3.1 相同的 hvigor 命令。**已在本机实际运行验证**（生成 HAP）。
 - `scripts/verify.ps1`：仓库交付门槛。先做静态校验（必需文件、配置、UTF-8/LF、签名材料、协议守卫、文档链接），再执行完整构建；**退出码 0 才算通过**。`-SkipBuild` 只跑静态校验，适合只改文档/配置时使用。
-- `scripts/install.ps1`：封装 `hdc install -r` / `hdc uninstall`，需要已签名的 HAP；安装行为未在真机验证。
+- `scripts/install.ps1`：封装 `hdc install -r` / `hdc uninstall`，需要已签名的 HAP；安装流程已于 2026-11-24 在真机验证（见 [8.1](#81-真机侧记录)）。
 
 ```powershell
 # 构建 debug HAP（等价于 3.1）
@@ -324,7 +324,7 @@ D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe
 | 执行的命令 | 3.1 节中的完整命令行（`assembleHap --no-daemon`）；同一命令也已由 `scripts/build.ps1` 封装验证 |
 | 结果 | 命令成功结束，生成 `entry/build/default/outputs/default/entry-default-unsigned.hap` |
 | 结论 | **ArkTS 源码可编译、可组装成 HAP**；命令行不带签名配置时产物仍是未签名包，不能安装 |
-| 真机侧 | 见 [8.1](#81-真机侧记录)：签名安装、启动、协议自检已验证；配对/浏览/证书/网络切换仍未验证（见 [TESTING.md](TESTING.md)） |
+| 真机侧 | 见 [8.1](#81-真机侧记录)：签名安装、启动、协议自检（24 项）、局域网配对（`dsh2` + CA 固定）、ArkWeb 浏览、配对失败路径与网络切换均已验证；手动签名材料、远程入口、设备上限等仍未验证（见 [TESTING.md §11](TESTING.md#11-执行记录2026-11-24-第一轮)） |
 
 ### 8.1 真机侧记录
 
@@ -335,7 +335,7 @@ D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe
 | unsigned 安装 | ⛔ 失败：`code:9568320 error: no signature file`（附带确认 hdc 退出码为 0，见 6.2 的坑） |
 | 已签名安装 | ✅ 2026-11-24 成功：DevEco 自动签名生成的 `entry-default-signed.hap`（423,005 B）经 `scripts/install.ps1` 安装，输出 `msg:install bundle successfully` |
 | 签名材料 | 调试证书 + `type = debug` Profile，`bundle-name = io.github.crazyjason.dshmobile.hmos`，设备白名单包含该机 UDID，有效期 2026-11-24 → 2027-11-24 |
-| 安装后运行 | ✅ 启动、空状态、协议自检（20 项）通过；详见 [TESTING.md §11](TESTING.md#11-执行记录2026-11-24-第一轮) |
+| 安装后运行 | ✅ 启动、空状态、协议自检（24 项）通过；配对/浏览/失败路径/网络切换等联网行为的真机结果见 [TESTING.md §11](TESTING.md#11-执行记录2026-11-24-第一轮) |
 
 > **自动签名的副作用**：DevEco 勾选「自动生成签名」后会**就地改写** `build-profile.json5`，写入本机绝对路径
 > 和 IDE 加密过的口令。该文件在版本控制里，**提交前必须还原**（`git checkout -- build-profile.json5`），
@@ -343,4 +343,4 @@ D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe
 > 被 `.gitignore` 排除，不会入库。`scripts/verify.ps1` 会在静态校验阶段拦下带 `signingConfigs` 的
 > `build-profile.json5`。
 
-> 第 8 节只覆盖“编译成 HAP”，8.1 只覆盖“装得上、跑得起来、纯解析自检通过”。任何关于**联网行为**（配对、TLS、浏览、会话、网络切换）的描述都需要对应的真机用例证据，不要用构建成功或启动成功代替功能验收。
+> 第 8 节覆盖“编译成 HAP”，8.1 覆盖签名安装与首次运行。**联网行为**（配对、TLS、浏览、会话、失败路径、网络切换）的验收证据统一记录在 [TESTING.md §11](TESTING.md#11-执行记录2026-11-24-第一轮)；远程入口、设备上限、ArkWeb Cookie 属性检查仍无真机证据。不要用构建成功或启动成功代替功能验收。
