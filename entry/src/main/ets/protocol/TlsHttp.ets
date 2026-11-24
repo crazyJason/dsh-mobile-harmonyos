@@ -353,6 +353,9 @@ export async function tlsRequest(origin: GatewayOrigin, method: string, path: st
     }
     const business: BusinessError = error as BusinessError;
     if (typeof business.code === 'number') {
+      // The socket code is the only clue when a handshake dies on the device; record it before the
+      // failure is collapsed into a user-facing category.
+      Log.warn(`tls ${method} ${path} failed: code ${business.code} ${business.message}`);
       throw classifySocketError(business);
     }
     throw transportFailure('gateway transport failure');

@@ -125,16 +125,24 @@ export async function validatePairingCa(der: Uint8Array, instanceId: string): Pr
   }
   const parsed: cert.X509Cert | undefined = await loadCertificate(der);
   if (parsed === undefined) {
+    Log.warn('pairing CA: the served bytes are not a parseable X.509 certificate');
     return undefined;
   }
   try {
-    // A pairing CA must be a CA certificate and verifiable with its own key, and its fingerprint
-    // must equal the pairing key's instance id, which is what binds it to the computer the desktop
-    // showed. Those three checks together reject any substituted trust anchor.
-    if (parsed.getBasicConstraints() < 0) {
-      return undefined;
-    }
-    if (!isWithinValidity(parsed)) {
+    // A pairing CA must be verifiable with its own key, and its fingerprint must equal the pairing
+    // key's instance id, which is what binds it to the computer the desktop showed.
+    //
+    // `getBasicConstraints()` returns the path length, and HarmonyOS returns -1 for a CA certificate
+    // that has CA:TRUE but omits the optional path-length field (verified on a Mate 60 Pro+ /
+    // HarmonyOS 7). Treating -1 as "not a CA" rejects every gateway whose CA leaves that field out,
+    // which is what the dsh-mobile plugin generates, so the extension is logged instead of gated:
+    // the trust anchor is the fingerprint, and a non-CA anchor cannot complete a handshake anyway.
+    const basicConstraints: number = parsed.getBasicConstraints();
+    const withinValidity: boolean = isWithinValidity(parsed);
+    Log.info(`pairing CA: basicConstraints=${basicConstraints} notBefore=${parsed.getNotBeforeTime()} ` +
+      `notAfter=${parsed.getNotAfterTime()} withinValidity=${withinValidity}`);
+    if (!withinValidity) {
+      Log.warn('pairing CA: outside its validity window');
       return undefined;
     }
     const publicKey: cryptoFramework.PubKey = parsed.getPublicKey();

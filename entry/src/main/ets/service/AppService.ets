@@ -195,6 +195,7 @@ export class AppService {
     const origin: GatewayOrigin = target.origin();
     const key: PairingKey = target.key;
     const caDer: Uint8Array | undefined = await GatewayClient.fetchPairingCa(origin);
+    Log.info(caDer === undefined ? 'pair: gateway served no pairing CA' : 'pair: pairing CA fetched');
     let pinned: Uint8Array;
     if (caDer === undefined) {
       // A LAN gateway is always self-signed, so it must serve its pairing CA; a missing CA there is
@@ -206,6 +207,9 @@ export class AppService {
       pinned = new Uint8Array(0);
     } else {
       const validated: Uint8Array | undefined = await validatePairingCa(caDer, key.instanceId);
+      Log.info(validated === undefined
+        ? 'pair: served CA does not match the pairing key'
+        : 'pair: served CA matches the pairing key');
       if (validated === undefined) {
         throw new AuthFailure(AuthFailureKind.TLS, 'pairing CA does not match the pairing key');
       }
@@ -218,6 +222,7 @@ export class AppService {
         : await GatewayClient.pair(origin, key.token, label, pinned, key.instanceId);
     } catch (pairError) {
       const failure: AuthFailure = asAuthFailure(pairError);
+      Log.warn(`pair failed: ${failure.kind} ${failure.message}`);
       if (failure.kind === AuthFailureKind.TLS) {
         // A TLS rejection is the one failure where the served identity is worth recording: the
         // fingerprint tells the user which certificate the address actually answered with.
