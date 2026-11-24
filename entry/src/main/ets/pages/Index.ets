@@ -424,8 +424,10 @@ struct Index {
       Row({ space: 12 }) {
         this.titleBlock('DSH Mobile', '连接电脑上的 DeepSeek Harness')
         Blank()
-        Button('＋')
-          .fontSize(20)
+        // ASCII '+' on purpose: the full-width U+FF0B has no glyph in the device font stack on
+        // HarmonyOS 7 and degrades to a tiny square, so the button looked broken on a real phone.
+        Button('+')
+          .fontSize(24)
           .width(40)
           .height(40)
           .backgroundColor(Palette.surfaceRaised)
