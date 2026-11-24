@@ -64,6 +64,43 @@ export function pemToDer(pem: string): Uint8Array | undefined {
   }
 }
 
+/**
+ * Parses an X.509 validity timestamp.
+ *
+ * `checkValidityWithDate` only accepts ASN.1 time text (UTCTime `YYMMDDHHMMSSZ` or
+ * GeneralizedTime `YYYYMMDDHHMMSSZ`), never ISO-8601, so the bounds are compared here instead.
+ */
+export function parseAsn1Time(value: string): number | undefined {
+  const match: RegExpMatchArray | null = value.trim().match(/^([0-9]{2}|[0-9]{4})([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{2})Z$/);
+  if (match === null) {
+    return undefined;
+  }
+  let year: number = Number.parseInt(match[1], 10);
+  if (match[1].length === 2) {
+    year = year >= 50 ? 1900 + year : 2000 + year;
+  }
+  const month: number = Number.parseInt(match[2], 10);
+  const day: number = Number.parseInt(match[3], 10);
+  const hour: number = Number.parseInt(match[4], 10);
+  const minute: number = Number.parseInt(match[5], 10);
+  const second: number = Number.parseInt(match[6], 10);
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 60) {
+    return undefined;
+  }
+  return Date.UTC(year, month - 1, day, hour, minute, Math.min(second, 59));
+}
+
+/** Whether the certificate is currently within its validity window. */
+function isWithinValidity(parsed: cert.X509Cert): boolean {
+  const notBefore: number | undefined = parseAsn1Time(parsed.getNotBeforeTime());
+  const notAfter: number | undefined = parseAsn1Time(parsed.getNotAfterTime());
+  if (notBefore === undefined || notAfter === undefined) {
+    return false;
+  }
+  const now: number = Date.now();
+  return now >= notBefore && now <= notAfter;
+}
+
 async function loadCertificate(der: Uint8Array): Promise<cert.X509Cert | undefined> {
   try {
     const blob: cert.EncodingBlob = { data: der, encodingFormat: cert.EncodingFormat.FORMAT_DER };
@@ -97,7 +134,9 @@ export async function validatePairingCa(der: Uint8Array, instanceId: string): Pr
     if (parsed.getBasicConstraints() < 0) {
       return undefined;
     }
-    parsed.checkValidityWithDate(new Date().toISOString());
+    if (!isWithinValidity(parsed)) {
+      return undefined;
+    }
     const publicKey: cryptoFramework.PubKey = parsed.getPublicKey();
     await parsed.verify(publicKey);
     return der;

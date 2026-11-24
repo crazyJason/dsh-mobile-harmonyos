@@ -89,16 +89,16 @@
 | `model/DeviceRecord.ets` | 已配对电脑的数据模型、状态枚举、JSON 序列化/反序列化 | `DeviceRecord`、`DeviceStatus`、`AccessMode`、`toJson`、`fromJson` |
 | `model/DeviceStore.ets` | 持久化：preferences 存元数据，Asset Store Kit 存设备凭据 | `DeviceStore` |
 | `protocol/Origin.ets` | HTTPS origin 严格解析、配对 URL 解析、同源/固定 authority 判定、私网地址判断 | `GatewayOrigin`、`parseOrigin`、`parseConnection`、`isSameOrigin`、`isPinnedAuthority` |
-| `protocol/PairingKey.ets` | 配对密钥（`dsh1`/`dsh2`）与 legacy 片段解析；CA 要求与降级保护 | `PairingKey`、`PairingTarget`、`parsePairingKey`、`pairingKeyFromUrl`、`preserveRemotePin` |
-| `protocol/CertPin.ets` | DER↔PEM、SHA-256 指纹、配对 CA 校验、服务端证书链校验 | `sha256Hex`、`derToPem`、`pemToDer`、`validatePairingCa`、`chainMatchesPinnedCa`、`chainContainsPinnedCa` |
-| `protocol/TlsHttp.ets` | 基于 `TLSSocket` 的最小 HTTPS/1.1 客户端；三档信任模式；超时与大小上限；错误分类 | `tlsRequest`、`TrustMode`、`TlsRequestOptions` |
+| `protocol/PairingKey.ets` | 配对密钥（`dsh1`/`dsh2` 裸密钥）与 URL 片段（`dsh2`/legacy）解析；CA 要求与降级保护 | `PairingKey`、`PairingTarget`、`parsePairingKey`、`pairingKeyFromUrl`、`preserveRemotePin` |
+| `protocol/CertPin.ets` | DER↔PEM、SHA-256 指纹、ASN.1 有效期解析、配对 CA 校验、服务端证书链校验。注意 `checkValidityWithDate` 只接受 ASN.1 时间文本，因此有效期由 `parseAsn1Time` 自行比较 | `sha256Hex`、`derToPem`、`pemToDer`、`parseAsn1Time`、`validatePairingCa`、`chainMatchesPinnedCa`、`chainContainsPinnedCa` |
+| `protocol/TlsHttp.ets` | 基于 `TLSSocket` 的最小 HTTPS/1.1 客户端；`TrustMode` 三档信任（`SYSTEM`/`PINNED`/`SKIP`）；超时与大小上限；错误分类 | `tlsRequest`、`TrustMode`、`TlsRequestOptions`（`pinned()` / `system()` / `bootstrap()`） |
 | `protocol/GatewayHttp.ets` | `discovery` / `ca.cer` / `metadata` / `native-pair|renew|probe`（含 system-trust 变体）；严格响应校验 | `GatewayClient`、`NativeSession`、`NativeProbe`、`GatewayDiscovery`、`GatewayMetadata` |
 | `protocol/Discovery.ets` | 局域网发现：UDP 广播 + DNS-SD + HTTPS 子网扫描兜底 | `LanDiscovery`、`parseAnnouncement`、`DISCOVERY_QUERY`、`MDNS_SERVICE_TYPE` |
-| `protocol/AuthFailure.ets` | 失败分类枚举与 HTTP 状态/错误码映射 | `AuthFailure`、`AuthFailureKind`、`failureForStatus` |
+| `protocol/AuthFailure.ets` | 失败分类枚举与 HTTP 状态/错误码映射；`STORAGE` 表示设备凭据无法持久化 | `AuthFailure`、`AuthFailureKind`、`failureForStatus` |
 | `common/Json.ets` | 有界、类型安全的 JSON 读取（不做整体 `as` 断言） | `parseJsonObject`、`readString`、`readNumber`、`keyCount` |
 | `common/Log.ets` | hilog 封装（domain `0x0D5B`、tag `DshMobile`） | `Log` |
 | `common/Theme.ets` | 深色主题调色板与相对时间格式化 | `Palette`、`formatRelative` |
-| `common/SelfCheck.ets` | 设备端协议规则自检（origin、密钥、配对链接） | `runSelfCheck`、`SelfCheckResult` |
+| `common/SelfCheck.ets` | 设备端协议规则自检（origin 解析与拒绝规则、`dsh1`/`dsh2` 密钥、配对链接与 legacy 片段、同源与 `wss:` 固定 authority、ASN.1 有效期解析） | `runSelfCheck`、`SelfCheckResult` |
 
 ## 4. 应用启动与生命周期
 
@@ -171,7 +171,10 @@ ArkTS 的 UI 与业务代码运行在应用主线程的事件循环上。本项�
 interpretPairingInput()                     service/AppService.ets
   ├─ parseConnection()                      protocol/Origin.ets
   ├─ pairingKeyFromUrl() / parsePairingKey() protocol/PairingKey.ets
-  └─ 推断 LAN / REMOTE
+  └─ 完整链接 → 直接得到 PairingTarget
+     裸密钥   → Index 用「扫描结果」或「手填 host:port」得到 origin，
+                再直接构造 PairingTarget（不重新拼 URL），
+                并校验发现的 instanceId 与密钥一致
       │
       ▼
 AppService.pair(target, label, displayName)
@@ -181,7 +184,8 @@ AppService.pair(target, label, displayName)
   │    ├─ BasicConstraints CA >= 0
   │    ├─ 有效期校验
   │    └─ 自签名验签
-  ├─ 无 CA 且 key 不要求 CA → 平台信任库（system 模式）
+  ├─ 无 CA 且（私网入口或密钥要求 CA）→ TLS 失败（身份不匹配）
+  ├─ 无 CA 且为远程公网证书入口 → 平台信任库（system 模式）
   ├─ 有 CA → 固定 CA（pinned 模式）
   ├─ POST /mobile-access/auth/native-pair            protocol/GatewayHttp.ets
   ├─ 严格校验响应（键集合/格式/时间）
@@ -194,9 +198,10 @@ Index 回到列表视图并刷新
 
 关键行为：
 
-- **LAN 模式总是要 CA**：即使链接是 legacy 格式（不编码 CA 要求），也会下载并校验 CA；没有 CA 视为身份不匹配。
-- **`dsh2` 强制 CA**：`ca.cer` 404 直接失败，不回退系统信任库。
-- **公网证书入口允许 404**：只有 `dsh1`（`requiresCa == false`）时可以使用平台信任库。
+- **局域网/私网入口必须提供 CA**：`target.remote === false` 时，`/mobile-access/ca.cer` 404 直接以 `AuthFailureKind.TLS` 失败，不进入系统信任库；这与上游 `PairingTrust.selectTrustAnchor` 的 LAN 规则一致。
+- **只有公网证书远程入口允许 404 回退**：`target.remote === true` 且密钥 `requiresCa === false` 时，404 才使用平台信任库（`pairWithSystemTrust()`）。
+- **`dsh2` 强制 CA**：即使远程，`requiresCa === true` 的密钥在 404 时同样硬失败。`#key=dsh1...` 不是上游生成的片段，客户端按上游规则拒绝，属于预期行为。
+- **裸密钥需要地址**：`dsh1` / `dsh2` 裸密钥本身不含 origin，需要用户扫描选择电脑或手填 `host:port`；公网证书入口就是通过 `dsh1` 裸密钥 + 地址进入 `pairWithSystemTrust()` 分支的。
 - 配对成功后记录以 `instanceId + origin` 为稳定 key；同一台电脑重新配对会复用记录名（`adoptIdentity`）并更新凭据。
 - 一次性 token 不写入任何持久化存储，配对结束即丢弃。
 - 写凭据失败会被归类为 `STORAGE`，UI 提示本地保存失败，避免用户误以为凭据已保存。
@@ -243,13 +248,13 @@ BrowserView.aboutToAppear()
 
 ### 9.1 三种信任模式
 
-`protocol/TlsHttp.ets` 用 `TrustMode` 表达一次请求如何验证网关：
+`protocol/TlsHttp.ets` 用 `TrustMode` 表达一次请求如何验证网关，并通过 `TlsRequestOptions` 的静态构造器选择：
 
-| 模式 | 实现 | 使用点 |
-| --- | --- | --- |
-| `SKIP`（bootstrap） | `skipRemoteValidation: true`，不提供 CA | 读 `discovery`、`ca.cer` |
-| `PINNED` | `secureOptions.ca = <CA PEM>`（**替换**平台信任库） | 所有已固定 CA 的控制请求 |
-| `SYSTEM` | 不设 CA、不跳过校验，使用平台信任库 | `dsh1` 公网证书入口且 `ca.cer` 404 |
+| 模式 | 构造器 | 实现 | 使用点 |
+| --- | --- | --- | --- |
+| `SKIP`（bootstrap） | `TlsRequestOptions.bootstrap(timeoutMs)` | `skipRemoteValidation: true`，不提供 CA | 读 `discovery`、`ca.cer` |
+| `PINNED` | `TlsRequestOptions.pinned(timeoutMs, caPem)` | `secureOptions.ca = <CA PEM>`（**替换**平台信任库） | 所有已固定 CA 的控制请求 |
+| `SYSTEM` | `TlsRequestOptions.system(timeoutMs)` | 不设 CA、不跳过校验，使用平台信任库 | 公网证书远程入口（不要求 CA 的密钥）且 `ca.cer` 404 |
 
 ### 9.2 bootstrap 链路
 
@@ -261,6 +266,8 @@ BrowserView.aboutToAppear()
 4. 只有校验通过，才把 CA 交给后续 `PINNED` 请求。
 
 **这是“先取证书再验证”，不是“先信任再验证”**：在 CA 通过指纹校验前，不会发送任何凭据（`native-pair` 永远在 CA 校验之后）。`discovery` 本身不携带秘密，但也会校验 origin/port 自洽。
+
+有效期校验不调用 `checkValidityWithDate`（该 API 只接受 ASN.1 时间文本，传 ISO-8601 会抛异常，从而误拒所有局域网配对）。`CertPin.ets` 用 `parseAsn1Time` 解析 `getNotBeforeTime()` / `getNotAfterTime()`：支持 UTCTime `YYMMDDHHMMSSZ` 与 GeneralizedTime `YYYYMMDDHHMMSSZ`，两位年份以 50 为分界（`>=50` 归 19xx，否则 20xx），再与 `Date.now()` 比较。该解析器也被设备端自检覆盖。
 
 ### 9.3 固定 CA 的 TLS 行为
 
@@ -274,7 +281,7 @@ BrowserView.aboutToAppear()
 ArkWeb 对自签证书会触发 `onSslErrorEvent`。本项目不盲目 `handleConfirm()`，而是：
 
 1. 取 `event.certChainData`（DER 链）与 `event.url`；
-2. URL 必须与已配对 origin 同源（否则取消）；
+2. URL 必须与已配对 origin 的**固定 authority** 一致（`https`/`wss`，host/port 相同），否则取消；
 3. 链中任意证书的 SHA-256 等于 `instanceId`，或链首证书能由固定 CA 验签 → 确认；
 4. 否则取消并提示证书不匹配。
 
@@ -357,7 +364,7 @@ ArkWeb 对自签证书会触发 `onSslErrorEvent`。本项目不盲目 `handleCo
 | --- | --- | --- |
 | `GatewayUrlPolicy.kt`（`GatewayOrigin` / `GatewayConnection` / `GatewayUrlPolicy`） | `protocol/Origin.ets` | 同样的 HTTPS-only、origin 规范化、配对 URL 解析、同源/`wss` authority 判定。Android 用 `java.net.URI`；ArkTS 手写 `splitUrl` 以避免平台 URI 的宽松归一化 |
 | `PairingTrust.kt`、`RemotePairingTrust.kt` | `protocol/PairingKey.ets` + `protocol/CertPin.ets` | Android 在 `PairingTrust` 内完成 CA 校验与 `preserveRemotePin`；ArkTS 拆成密钥解析（PairingKey）与证书校验（CertPin）。`preserveRemotePin` 已实现但当前 UI 流程未接入 |
-| `PairingScanPolicy.kt` | `protocol/PairingKey.ets` | Android 由扫码结果 + 用户选择模式决定 LAN/REMOTE；ArkTS 由 origin 主机判断（当前是私有网段前缀的简化判断） |
+| `PairingScanPolicy.kt` | `protocol/PairingKey.ets` | Android 由扫码结果 + 用户选择模式决定 LAN/REMOTE；ArkTS 由 origin 主机判断：`isPrivateNetworkHost`（私有 IPv4、CGNAT `100.64/10`、`localhost`）视为局域网，其余主机名/公网地址视为远程。未复刻上游对 cpolar/cloudflared/ts.net 等隧道厂商后缀的细分 |
 | `PinnedTls.kt` | `protocol/TlsHttp.ets` + `protocol/CertPin.ets` | Android 用 `SSLContext` + 自定义 `TrustManagerFactory`（只含固定 CA），并校验 WebView 叶子证书（SAN、EKU、有效期）；ArkTS 用 `TLSSocket.secureOptions.ca` 完成握手信任，再由 `CertPin.ets` 做指纹与“leaf 由固定 CA 验签”的链校验，未实现 SAN/EKU 细分检查 |
 | `NativeAuthClient.kt` | `protocol/GatewayHttp.ets` | 同样的接口与响应校验；Android 用 `HttpsURLConnection` + `SSLSocketFactory`，ArkTS 用手写 HTTP/1.1。Android 的超时组合更细（connect/read 分开），ArkTS 以总超时近似 |
 | `LanDiscovery.kt` | `protocol/Discovery.ets`（UDP 部分） | 同样的查询串、端口、公告 5 键校验、发送方地址校验、按 instanceId 合并；Android 用 `DatagramSocket`，ArkTS 用 `UDPSocket` |
@@ -367,7 +374,7 @@ ArkWeb 对自签证书会触发 `onSslErrorEvent`。本项目不盲目 `handleCo
 | `NativeSessionCookieInstaller.kt` / `NativeSessionCookies.kt` | `service/AppService.ets#installCookies` | 同样的 4 个 Cookie 名与属性；Android 写 `CookieManager`，ArkTS 写 `WebCookieManager` |
 | `SecureWebViewClient.kt`（SSL 续接） | `pages/BrowserView.ets#handleSslError` + `AppService.shouldContinueSslError` | 同样的“链中固定 CA 或 leaf 可由固定 CA 验签才放行”策略 |
 | `NativeBridge.kt`、`NativeBridgePolicy.kt` | **未实现** | 页面检测不到 `window.dshMobileNative`，运行在上游支持的浏览器模式 |
-| `QrDecoder.kt`、`ScanActivity.kt` | **未实现** | 无扫码入口；`CAMERA` 权限已在 manifest 声明但未使用 |
+| `QrDecoder.kt`、`ScanActivity.kt` | **未实现** | 无扫码入口；`module.json5` 未申请相机权限（仅 `INTERNET` / `GET_NETWORK_INFO`），改为粘贴链接或裸密钥 + 地址 |
 | `DeviceStatusPoller.kt` | `pages/Index.ets#refreshStatuses` + `AppService.probe` | 简化版：进入列表时逐台探活、菜单里可“立即检测”，没有周期性轮询器 |
 | `IrohConnectionController.kt`、`IrohHttpsTransport.kt` 等 | **未实现** | 只支持 HTTPS 直连入口 |
 | `AppUpdateChecker.kt` / `BackgroundNotificationService.kt` / `TaskNotificationPublisher.kt` | **未实现** | 无应用内更新、无后台通知 |
@@ -394,9 +401,8 @@ ArkWeb 对自签证书会触发 `onSslErrorEvent`。本项目不盲目 `handleCo
 
 | 缺口 | 影响 | 方向 |
 | --- | --- | --- |
-| 公网证书入口（`dsh1`）的完整链接解析未打通 | `pairingKeyFromUrl` 只在 `key=dsh2` 或 legacy 片段时返回密钥；完整的 `dsh1` 配对 URL 会被判定为“没有有效配对密钥”，`AppService` 的 CA 404 → 系统信任分支因此难以走到 | 让 URL 解析接受 `dsh1`，并在 UI 中区分“需要 CA”与“允许系统信任” |
-| 远程模式判定是私有网段前缀的简化判断 | `192.168.` / `10.` / `172.16.` / `127.` 之外一律视为远程；`172.17–31`、CGNAT `100.64/10`、IPv6 私网会被误判 | 对齐上游 `RemoteHostPolicy` 的完整规则 |
-| `NativeSessionCookies` 相关工具中 `preserveRemotePin`、`fetchMetadata`、`isPinnedAuthority` 未接入主流程（`fetchServedCertificate` 已用于 TLS 诊断日志） | 远程降级保护、metadata 兼容性提示尚未使用 | 在配对/诊断流程中接入；`isPinnedAuthority` 目前只被 SSL 续接与自检使用 |
+| 远程/局域网模式判定比上游简单 | 以 `isPrivateNetworkHost` 判定：私有 IPv4、CGNAT `100.64/10`、`localhost` 为 LAN，其余主机名/公网地址为 REMOTE；不识别 cpolar/cloudflared/ts.net 等隧道厂商后缀。影响仅限超时档位、列表标签与“私网必须供 CA”的判定；证书/凭据校验本身不变 | 可选：复刻上游 `RemoteHostPolicy` 的细分规则 |
+| 协议层中 `preserveRemotePin`、`fetchMetadata` 未接入主流程（`isPinnedAuthority` 已用于 SSL 续接与自检，`fetchServedCertificate` 已用于 TLS 诊断日志） | 远程降级保护、metadata 兼容性提示尚未使用 | 在配对/诊断流程中接入 |
 | 删除本地设备记录时未主动清除 ArkWeb 中已注入的会话 Cookie | 旧 Cookie 可能残留到会话过期（仍受 host-only/HTTPS/Strict 约束，且只属于同一台电脑） | 在删除/重新配对时用同名 Cookie 过期（`Max-Age=0`）清理 |
 | 无 `window.dshMobileNative` 原生桥 | 页面原生增强能力不可用 | 按上游 `NativeBridgePolicy` 定义消息白名单后再实现 |
 | 无推送 / 无 iroh / 无扫码 / 无原生文件选择器 | 见 [README 已知限制](../README.md#已知限制) | 后续版本 |

@@ -197,8 +197,10 @@ export class AppService {
     const caDer: Uint8Array | undefined = await GatewayClient.fetchPairingCa(origin);
     let pinned: Uint8Array;
     if (caDer === undefined) {
-      if (key.requiresCa) {
-        throw new AuthFailure(AuthFailureKind.TLS, 'gateway did not serve the CA the pairing key requires');
+      // A LAN gateway is always self-signed, so it must serve its pairing CA; a missing CA there is
+      // an identity failure rather than a reason to fall back to the platform trust store.
+      if (key.requiresCa || !target.remote) {
+        throw new AuthFailure(AuthFailureKind.TLS, 'gateway did not serve the pairing CA');
       }
       // A public-trust entry served by a real certificate authority.
       pinned = new Uint8Array(0);

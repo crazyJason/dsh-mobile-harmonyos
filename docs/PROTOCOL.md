@@ -95,7 +95,7 @@ https://<host>:<port>/mobile-access/pair#<fragment>
 
 - 路径 MUST 恰好是 `/mobile-access/pair`；
 - MUST 没有 query、没有 userinfo；
-- fragment 可选，但一旦存在 MUST 匹配 [3.2](#32-三种片段格式) 的格式；
+- fragment 可选，但一旦存在 MUST 匹配 [3.2](#32-三种配对密钥格式) 的格式；
 - 手机客户端 MUST NOT 把 fragment 发送给服务器（浏览器不会发送，原生客户端也必须遵守）。
 
 ### 2.4 同源与固定 authority
@@ -112,14 +112,14 @@ https://<host>:<port>/mobile-access/pair#<fragment>
 | --- | --- | --- |
 | `BOOTSTRAP` | **不校验**服务端证书（`skipRemoteValidation`），但响应必须通过指纹校验后才可信任 | 首次读取 `/mobile-access/discovery`、`/mobile-access/ca.cer` |
 | `PINNED` | 只信任配对 CA（替换系统信任库，而不是追加） | 已校验 CA 后的所有控制接口、Web 容器 |
-| `SYSTEM` | 平台信任库（公共 CA） | 仅 `dsh1` 公网证书入口，且 `ca.cer` 明确返回 404 时 |
+| `SYSTEM` | 平台信任库（公共 CA） | 仅公网证书**远程**入口（密钥不要求 CA）且 `ca.cer` 明确返回 404 时 |
 
 关键规则：
 
 1. **bootstrap 不是“先信任”**：读取 CA 后 MUST 校验 `SHA-256(DER) == instanceId`、CA 基本约束、自签名与有效期，任一失败立即中止，不能继续发凭据。
 2. **固定 CA 是替换而非追加**：把 CA PEM 传给 TLS 层的自定义信任锚时，不能把它“加入”系统信任库，否则系统里任意 CA 都能冒充网关。
 3. **dsh2 禁止降级**：`dsh2` 入口 MUST 提供 CA；`ca.cer` 404 或指纹不匹配是硬失败（identity mismatch），不得回退到系统信任库。
-4. **远程已固定 CA 不得被 dsh1 降级**：同一台电脑之前以远程模式固定过 CA，再次用 `dsh1` 链接配对时仍 MUST 要求 CA（`preserveRemotePin` 规则）。
+4. **远程已固定 CA 不得被不要求 CA 的密钥降级**：同一台电脑之前以远程模式固定过 CA，再次配对时即使拿到不要求 CA 的密钥（`dsh1` 裸密钥 / legacy 片段）也仍 MUST 要求 CA（`preserveRemotePin` 规则）。
 
 ---
 
@@ -135,13 +135,15 @@ https://<host>:<port>/mobile-access/pair#<fragment>
 
 片段从不进入 HTTP 请求，因此不会出现在网关访问日志或代理日志中。电脑端把这个完整链接编码成二维码，或直接展示给用户复制。
 
-### 3.2 三种片段格式
+### 3.2 三种配对密钥格式
 
-| 格式 | 片段示例 | 含义 | CA 要求 |
-| --- | --- | --- | --- |
-| `dsh2` | `key=dsh2.<64hex>.<43char>` | 入口提供自签 CA（典型：自签名 FRP、非 discovery 的自建入口） | **必须**提供 CA |
-| `dsh1` | `key=dsh1.<64hex>.<43char>` | 入口使用**公共 CA 签发**的证书 | 可以没有 CA（404 合法） |
-| legacy | `instance=<64hex>&token=<43char>` | 旧版/局域网链接，不编码 CA 需求 | LAN 模式仍必须校验网关 CA |
+`dsh1` / `dsh2` 是**密钥格式**（也是插件 `pairing/open` 返回的 `appKey` 形式）；是否把它们放进 URL 片段由上游的入口类型决定：`dsh2` 会出现在 `#key=...` 片段中，`dsh1` 不会出现在 URL 里。第三种是旧版 legacy 片段。
+
+| 格式 | 示例 | 上游是否写入 URL 片段 | 含义 | CA 要求 |
+| --- | --- | --- | --- | --- |
+| `dsh2` | `key=dsh2.<64hex>.<43char>` | **是**（自签 CA 入口） | 入口提供自签 CA（典型：自签名 FRP、非 discovery 的自建入口） | **必须**提供 CA |
+| `dsh1` | `dsh1.<64hex>.<43char>` | **否**（作为 appKey 返回，可作裸密钥使用） | 入口使用**公共 CA 签发**的证书 | 可以没有 CA（404 合法） |
+| legacy | `instance=<64hex>&token=<43char>` | **是**（局域网 / 公网证书 / 旧版） | 不编码 CA 需求 | LAN 模式仍必须校验网关 CA |
 
 正则（完整匹配，`^...$`）：
 
@@ -160,22 +162,28 @@ dsh2 片段:     ^key=dsh2\.[a-f0-9]{64}\.[A-Za-z0-9_-]{43}$
 | `token` | 43 个字符，字符集 `[A-Za-z0-9_-]`（base64url 无填充的 32 字节随机数），大小写敏感 |
 | 前缀数字 | `1` = 公网证书入口；`2` = 提供自签 CA 的入口 |
 
-> 注意：`dsh1` / `dsh2` 中的数字是**入口的信任模型**，不是协议版本；两种格式的字段长度完全一致。
+> 注意：
+>
+> - `dsh1` / `dsh2` 中的数字是**入口的信任模型**，不是协议版本；两种格式的字段长度完全一致。
+> - `#key=dsh1...` **不是合法的配对链接片段**：上游只为需要自签 CA 的入口生成 `#key=dsh2...`，其余入口生成 legacy 片段。Android 客户端同样只接受 `#key=dsh2...`（`PairingKey.parse(...)?.takeIf { it.requiresCa }`），拒绝 `#key=dsh1...` 是与上游一致的行为，不是客户端缺陷。
+> - `dsh1` 裸密钥需要配合主机地址使用（见 [3.4](#34-解析规则)）。
 
 ### 3.3 CA 要求矩阵
 
-| 场景 | 链接格式 | 是否下载 `/ca.cer` | `ca.cer` 返回 404 时 |
+| 场景 | 密钥来源 | 是否下载 `/ca.cer` | `ca.cer` 返回 404 时 |
 | --- | --- | --- | --- |
-| 局域网直连 | legacy（常见） | 是（LAN 网关总是提供配对 CA） | 失败：身份无法验证 |
-| 自签名 FRP / 自建入口 | `dsh2` | 是 | 失败（硬失败，禁止回退系统信任） |
-| 公网证书入口（Cloudflare/Cpolar/Tailscale/自有域名） | `dsh1` | 可以先尝试；404 表示无自签 CA | 允许，使用平台信任库 |
-| 同一台远程电脑再次配对（曾固定 CA） | 即使给了 `dsh1` | 是，保持 CA 强制 | 失败（防止降级攻击） |
+| 局域网直连 | legacy 片段（常见） | 是（LAN 网关总是提供配对 CA） | 失败：身份无法验证 |
+| 自签名 FRP / 自建入口 | `#key=dsh2...` 片段 | 是 | 失败（硬失败，禁止回退系统信任） |
+| 公网证书入口（Cloudflare/Cpolar/Tailscale/自有域名） | legacy 片段，或 `dsh1` 裸密钥 + 地址 | 可以先尝试；404 表示无自签 CA | 允许，使用平台信任库 |
+| 同一台远程电脑再次配对（曾固定 CA） | 任意不要求 CA 的密钥 | 是，保持 CA 强制 | 失败（防止降级攻击） |
 
 上表的实现要点：
 
 - **LAN 模式**：配对时必须先下载并校验 CA，再用该 CA 发起 `native-pair`；不能因为链接是 legacy 格式就跳过 CA。
-- **远程模式**：先尝试 `/ca.cer`。有 CA → 校验并固定；明确 404 → 仅当密钥不要求 CA（`dsh1`）时使用系统信任库；其他错误（网络、TLS、5xx）应当**向上抛出**，不能当作 404 处理。
-- **降级保护**：若本地已有同一 `instanceId` 且保存了 CA 的远程记录，新的配对必须把 `requiresCa` 置为 true（即使链接是 `dsh1`）。
+- **远程模式**：先尝试 `/ca.cer`。有 CA → 校验并固定；明确 404 → 仅当 `target.remote === true` 且密钥不要求 CA（公网证书入口）时使用系统信任库；其他错误（网络、TLS、5xx）应当**向上抛出**，不能当作 404 处理。私网入口即使密钥不要求 CA，404 也必须失败。
+- **降级保护**：若本地已有同一 `instanceId` 且保存了 CA 的远程记录，新的配对必须把 `requiresCa` 置为 true（即使新密钥不要求 CA）。
+
+> 实现注记：本仓库的 HarmonyOS 客户端与上游 `PairingTrust.selectTrustAnchor` 保持一致——私网（LAN）入口必须提供并校验 `ca.cer`，缺失即按身份不匹配失败；只有公网证书远程入口（密钥不要求 CA 且 `ca.cer` 明确 404）才允许使用平台信任库。判定入口类型的规则见 [ARCHITECTURE.md](ARCHITECTURE.md#15-已知缺口与后续工作)。
 
 ### 3.4 解析规则
 
@@ -185,15 +193,19 @@ dsh2 片段:     ^key=dsh2\.[a-f0-9]{64}\.[A-Za-z0-9_-]{43}$
 2. 先尝试按**裸 origin** 解析；成功则得到一个可浏览的 origin（不含配对 key）；
 3. 否则按**配对 URL** 解析：scheme 必须 `https`、无 userinfo/query、路径恰好 `/mobile-access/pair`、fragment 可选且匹配 3.2 的正则；
 4. 从 fragment 提取配对密钥：
-   - 以 `key=` 开头：必须是 `dsh2`（`dsh1` 的 URL 在部分客户端中不被接受，见下）；
-   - 否则必须是完整的 `instance=...&token=...`；
-5. 校验通过后，持久化的只有**规范化 origin**；token 只在内存中使用，配对成功后丢弃。
+   - 以 `key=` 开头：MUST 是 `dsh2`。`#key=dsh1...` 不是上游会生成的格式，按上游规则拒绝（Android 的 `GatewayUrlPolicy.pairingKey` 同样要求 `requiresCa`）；
+   - 否则 MUST 是完整的 `instance=...&token=...`；
+5. 如果输入是**裸密钥**（`dsh1.*` 或 `dsh2.*`，没有 origin）：由用户通过局域网扫描选择电脑或手填地址，配对目标 = 该地址的 origin + 裸密钥（直接构造配对目标，不重新拼 `#key=...` URL）；
+6. 校验通过后，持久化的只有**规范化 origin**；token 只在内存中使用，配对成功后丢弃。
 
 实现差异（客户端行为，不是协议要求）：
 
-- 上游 Android 客户端的配对入口来自二维码扫描，因此只接受完整 URL；
-- 本仓库的 HarmonyOS 客户端没有扫码，额外支持粘贴**裸配对密钥**（`dsh2.*` / `dsh1.*`），再配合局域网扫描或手填主机地址拼成配对 URL；
-- 若粘贴的是 `dsh1` 裸密钥，需要主机地址才能配对；完整 `dsh1` URL 的解析取决于所用客户端版本（本仓库客户端的 fragment 解析以 CA 强制为前提，`dsh1` URL 可能被判定为「没有有效配对密钥」）。
+- 上游 Android 客户端的配对入口来自二维码扫描，因此只接受完整 URL（扫码得到的就是完整配对链接）；
+- 本仓库的 HarmonyOS 客户端没有扫码，支持两种输入：
+  - **完整链接**（`#key=dsh2...` 或 `#instance=...&token=...`）；
+  - **裸密钥** + 地址（局域网扫描或手填 `host:port`，缺省补 3443）；
+- **公网证书入口**使用裸 `dsh1` 密钥 + 地址配对（或直接粘贴该入口的 legacy 完整链接）；`#key=dsh1...` 被拒绝是上游一致行为，不是缺陷；
+- 使用发现结果提供地址时，客户端会校验发现的 `instanceId` 与裸密钥一致，避免把 token 发给另一台电脑。
 
 ### 3.5 示例
 
@@ -205,6 +217,13 @@ https://dsh.example.com/mobile-access/pair#key=dsh2.4f3c9a...（64位小写hex�
 https://dsh.example.com:3443/mobile-access/pair#key=dsh2.<64hex>.<43char>
 ```
 
+合法的裸密钥（需配合地址）：
+
+```text
+dsh2.<64hex>.<43char>       # 自签 CA 入口
+dsh1.<64hex>.<43char>       # 公网证书入口：ca.cer 404 → 平台信任库
+```
+
 非法输入（应拒绝）：
 
 | 输入 | 原因 |
@@ -213,6 +232,7 @@ https://dsh.example.com:3443/mobile-access/pair#key=dsh2.<64hex>.<43char>
 | `https://192.168.1.23:3443/mobile-access/pair` | 没有 fragment / 没有 key（无法配对，只可浏览） |
 | `https://192.168.1.23:3443/mobile-access/pair#key=dsh2.<63hex>.<43char>` | instanceId 长度错误 |
 | `https://192.168.1.23:3443/mobile-access/pair#key=dsh2.<64HEX>.<43char>` | 大写十六进制 |
+| `https://192.168.1.23:3443/mobile-access/pair#key=dsh1.<64hex>.<43char>` | 上游不生成 `#key=dsh1...`；按上游规则拒绝 |
 | `https://user@192.168.1.23:3443/mobile-access/pair#...` | 不允许 userinfo |
 | `https://192.168.1.23:3443/other/path#...` | 路径必须是 `/mobile-access/pair` |
 
@@ -354,7 +374,7 @@ Content-Type: application/json
 规则：
 
 - `200`：必须校验指纹后才可使用；
-- `404`：仅当配对密钥**不要求 CA**（`dsh1`）时允许改用平台信任库；否则是身份不匹配；
+- `404`：仅当密钥**不要求 CA**（`dsh1` 裸密钥 / 公网证书入口的 legacy 密钥）时允许改用平台信任库；否则是身份不匹配；
 - 其他状态：按错误分类处理，不能当 404；
 - 响应体过大（建议上限 16 KiB）→ 视为异常。
 
@@ -426,7 +446,7 @@ Connection: close
 TLS 信任：
 
 - `dsh2` / LAN：使用已校验的固定 CA；
-- `dsh1` 且 `ca.cer` 404：使用平台信任库。
+- 不要求 CA 的密钥（`dsh1` 裸密钥，或公网证书入口的 legacy 密钥）且 `ca.cer` 返回 404：使用平台信任库。
 
 响应 `201 Created`（7 个必需键，`installationId` 可选）：
 
@@ -590,7 +610,7 @@ Cookie: dsh_ma_session=<sessionToken>; Path=/; Secure; HttpOnly; SameSite=Strict
 | --- | --- |
 | 协议 | UDP（IPv4 广播） |
 | 端口 | **3443**（与 HTTPS 端口相同） |
-| 查询报文 | ASCII 字符串 `DSH_MOBILE_DISCOVER_V1`（21 字节，无换行） |
+| 查询报文 | ASCII 字符串 `DSH_MOBILE_DISCOVER_V1`（22 字节，无换行） |
 | 查询方式 | 向 `255.255.255.255` 以及各子网的定向广播地址发送 |
 | 应答 | 网关向查询来源回送一个 5 键 JSON 公告（与 5.1 的响应体相同） |
 | 主动广播 | 网关每 **3 秒**向广播地址发送同样的 JSON 公告 |
@@ -741,7 +761,7 @@ __Host-dsh_ma_device_id  浏览器侧非密钥设备标识（原生客户端不�
 
 | 常量 | 值 |
 | --- | --- |
-| UDP 查询 | `DSH_MOBILE_DISCOVER_V1`（ASCII，21 字节） |
+| UDP 查询 | `DSH_MOBILE_DISCOVER_V1`（ASCII，22 字节） |
 | UDP 端口 | `3443` |
 | 广播间隔 | 每 `3000 ms` 一次 |
 | DNS-SD 服务类型 | `_dsh-mobile._tcp` |
