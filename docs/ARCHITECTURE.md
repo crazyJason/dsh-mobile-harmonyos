@@ -262,10 +262,15 @@ BrowserView.aboutToAppear()
 
 1. 用 `SKIP` 建立 TLS（此阶段不校验证书）；
 2. 读取 `/mobile-access/ca.cer`（或 `/discovery`）；
-3. 对 CA 做完整校验：`SHA-256 == instanceId`、CA 基本约束、有效期、自签名；
+3. 对 CA 做校验：`SHA-256 == instanceId`、有效期、自签名（用自己的公钥验签）；
 4. 只有校验通过，才把 CA 交给后续 `PINNED` 请求。
 
 **这是“先取证书再验证”，不是“先信任再验证”**：在 CA 通过指纹校验前，不会发送任何凭据（`native-pair` 永远在 CA 校验之后）。`discovery` 本身不携带秘密，但也会校验 origin/port 自洽。
+
+> **CA 基本约束不能当门禁（2026-11-24 真机结论）**：HarmonyOS 的 `X509Cert.getBasicConstraints()` 返回的是**路径长度**，
+> 对「CA:TRUE 但没有 pathLenConstraint」的证书返回 `-1`。`dsh-mobile` 生成的配对 CA 正好省略该可选字段，
+> 因此早期把 `< 0` 判成“不是 CA”的实现会**拒掉所有这类网关**（真机上表现为配对时“网关证书与配对信息不一致”）。
+> 现在只记录该值供排障，信任判定仍由指纹 + 有效期 + 自签名承担；锚点若不是 CA，后续握手也无法通过。
 
 有效期校验不调用 `checkValidityWithDate`（该 API 只接受 ASN.1 时间文本，传 ISO-8601 会抛异常，从而误拒所有局域网配对）。`CertPin.ets` 用 `parseAsn1Time` 解析 `getNotBeforeTime()` / `getNotAfterTime()`：支持 UTCTime `YYMMDDHHMMSSZ` 与 GeneralizedTime `YYYYMMDDHHMMSSZ`，两位年份以 50 为分界（`>=50` 归 19xx，否则 20xx），再与 `Date.now()` 比较。该解析器也被设备端自检覆盖。
 

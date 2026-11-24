@@ -2,13 +2,14 @@
 
 面向 [DeepSeek Harness](https://github.com/saya-ch/dsh-mobile) 社区插件 **dsh-mobile** 的 HarmonyOS NEXT（ArkTS / ArkUI）原生手机客户端。它复刻上游 Android 客户端的配对与浏览能力，让 HarmonyOS 手机可以连接运行着 DeepSeek Harness + dsh-mobile 插件的电脑。
 
-> **English summary.** `dsh-mobile-harmonyos` is a native HarmonyOS NEXT (ArkTS/ArkUI) client for the community DeepSeek Harness plugin [`dsh-mobile`](https://github.com/saya-ch/dsh-mobile). The upstream project ships an Android WebView shell that cannot be installed on HarmonyOS NEXT, because HarmonyOS NEXT no longer runs Android APKs. This project reimplements the phone-side client natively: it parses the plugin's one-time pairing link, pins the gateway's self-signed pairing CA against the SHA-256 `instanceId` carried in that link, calls the plugin's `native-pair` / `native-renew` / `native-probe` control endpoints over a hand-written `TLSSocket` HTTP/1.1 client, stores the long-lived device credential in the Asset Store Kit, and loads the DSH mobile page in an ArkWeb container with the paired session cookies installed. The project has been compiled into a HAP on the development machine described below; **it has not been accepted on a real phone yet**, so treat device behaviour as untested.
+> **English summary.** `dsh-mobile-harmonyos` is a native HarmonyOS NEXT (ArkTS/ArkUI) client for the community DeepSeek Harness plugin [`dsh-mobile`](https://github.com/saya-ch/dsh-mobile). The upstream project ships an Android WebView shell that cannot be installed on HarmonyOS NEXT, because HarmonyOS NEXT no longer runs Android APKs. This project reimplements the phone-side client natively: it parses the plugin's one-time pairing link, pins the gateway's self-signed pairing CA against the SHA-256 `instanceId` carried in that link, calls the plugin's `native-pair` / `native-renew` / `native-probe` control endpoints over a hand-written `TLSSocket` HTTP/1.1 client, stores the long-lived device credential in the Asset Store Kit, and loads the DSH mobile page in an ArkWeb container with the paired session cookies installed. The project has been compiled into a HAP on the development machine described below and, as of 2026-11-24, installed and paired on a real HarmonyOS 7 phone: LAN pairing against a pinned self-signed CA, the ArkWeb session, and recovery after a process restart all work; failure paths, network switching and remote entries remain untested. **Treat everything outside that LAN main flow as untested device behaviour.**
 
 > **项目状态**
 >
 > - ✅ 已在本机（DevEco Studio 26.0.0 / HarmonyOS SDK API 26 / hvigor 6.26.9 / JDK 17）用命令行完整编译，产物为 `entry/build/default/outputs/default/entry-default-unsigned.hap`。
+> - ✅ 已在真机安装并跑通局域网主流程（2026-11-24，HUAWEI Mate 60 Pro+ / HarmonyOS 7.0.0.111 / API 26）：DevEco 自动签名 → 安装 → 局域网配对（`dsh2` 密钥 + 自签 CA 固定）→ ArkWeb 登录浏览 DSH 主页 → 进程重启后恢复。
 > - ⛔ 未签名 HAP 无法安装到真机；签名需要 DevEco Studio 自动签名（登录华为账号）或自备签名材料。
-> - ⛔ 尚未在真机上做任何配对、浏览、TLS 或网络切换验收；所有真机行为以潜在缺陷看待，见 [docs/TESTING.md](docs/TESTING.md)。
+> - ⛔ 失败路径、网络切换、远程入口与负向证书实验**仍未执行**；这些场景下的行为仍以潜在缺陷看待，执行记录见 [docs/TESTING.md](docs/TESTING.md#11-执行记录2026-11-24-第一轮)。
 > - 上游是协议的事实来源（source of truth），本项目与它的对应关系见 [docs/PROTOCOL.md](docs/PROTOCOL.md)。
 
 ---
@@ -209,7 +210,7 @@ hdc install -r entry\build\default\outputs\default\entry-default-signed.hap
 
 ## 已知限制
 
-1. **无真机验收**：本仓库的构建只在本机编译层面通过；配对、浏览、证书续接、网络切换均**未在真机验证**。
+1. **真机验收只覆盖局域网主流程**：2026-11-24 已在真机上跑通安装、配对、ArkWeb 浏览与重启恢复；失败路径、网络切换、远程入口仍未验证（见 [docs/TESTING.md](docs/TESTING.md#11-执行记录2026-11-24-第一轮)）。
 2. **无原生扫码**：必须复制/粘贴配对链接或裸密钥；**未申请相机权限**（`module.json5` 只声明 `INTERNET` / `GET_NETWORK_INFO`），扫码 UI 未实现。
 3. **无推送**：没有 `mobile-push` 注册，后台任务完成/需要确认时不会收到系统通知。
 4. **无 iroh**：上游 Android 的 iroh 点对点传输未移植；仅支持 HTTPS 直连入口（局域网、自签名 FRP、公网证书）。
@@ -313,6 +314,6 @@ dsh-mobile-harmonyos/
 | [docs/BUILD.md](docs/BUILD.md) | 环境、DevEco Studio 图形构建、命令行构建、签名与安装、常见构建错误 |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | 原生配对协议实现者规范：URL、接口、字段、Cookie、发现、错误码、常量 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 模块划分、线程与生命周期、证书固定设计、与 Android 组件对照 |
-| [docs/TESTING.md](docs/TESTING.md) | 真机手工测试计划（**尚未执行**）、缺陷报告模板 |
+| [docs/TESTING.md](docs/TESTING.md) | 真机手工测试计划与执行记录（L1、L2 局域网主流程已执行，其余待跑）、缺陷报告模板 |
 | [docs/adr/](docs/adr/README.md) | 架构决策记录：TLSSocket 取舍、信任根、原生重写等已定型的决策 |
 | [AGENTS.md](AGENTS.md) | 仓库对 AI agent 的规则：可执行命令、目录地图、硬规则、提交与交付定义 |

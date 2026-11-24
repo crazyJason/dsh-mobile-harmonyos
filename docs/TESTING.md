@@ -2,12 +2,14 @@
 
 本文是 HarmonyOS NEXT 真机手工测试计划，覆盖配对、浏览、证书、网络与生命周期场景，并规定缺陷报告需要采集的信息。
 
-> 🟡 **执行状态：部分执行（2026-11-24 第一轮真机）**
+> 🟡 **执行状态：部分执行（2026-11-24 两轮真机）**
 >
-> - **L1 已执行**：TC-01（安装/启动/空状态）、TC-02（设备端协议自检，20 项全部通过）在真机上通过，记录见 [§11](#11-执行记录2026-11-24-第一轮)。
-> - 该轮发现并已修复 4 个**只有真机才能暴露**的缺陷（全角加号字形、底部导航条白条、系统弹窗浅色、启动日志不可见），见 [§11.3](#113-本轮缺陷已修复)。
-> - **L2–L5 仍未执行**：电脑端尚未安装 `dsh-mobile` 插件，无法生成配对链接，配对、浏览、证书、网络切换全部仍属未验证状态。
-> - 因此 README 中的“功能范围”目前仍只能理解为“代码已实现”，不等于“设备上可用”。
+> - **L1 已执行**：TC-01（安装/启动/空状态）、TC-02（设备端协议自检，20 项全部通过）在真机上通过。
+> - **L2 已执行（局域网主流程）**：装好电脑端 `dsh-mobile@0.8.15` 后，局域网配对（`dsh2` 密钥 + CA 固定）、ArkWeb 登录浏览、进程重启后恢复、电脑端设备列表全部通过。
+> - 两轮共发现并修复 5 个**只有真机才能暴露**的缺陷（全角加号字形、底部导航条白条、系统弹窗浅色、启动日志不可见、CA 基本约束误拒），见 [§11.3](#113-本轮缺陷已修复)。
+> - **L3–L5 仍未执行**：撤销、限流、配对码过期/复用、会话过期、网络切换、远程入口、负向证书实验。
+> - 因此 README 中的“功能范围”目前只能理解为“代码已实现 + 局域网主流程已在真机跑通”，不等于所有场景可用。
+> - 执行记录、环境与可复用的自动化手法见 [§11](#11-执行记录2026-11-24-第一轮)。
 
 - [0. 测试前置条件](#0-测试前置条件)
 - [1. 测试分级与执行顺序](#1-测试分级与执行顺序)
@@ -61,7 +63,7 @@
 | --- | --- | --- |
 | L0 构建 | 命令行构建出 HAP | ✅ 已执行（编译 + 签名 + 装机） |
 | L1 基础可用性 | 安装、启动、空列表、**协议自检（首个冒烟检查）** | ✅ 已执行（TC-01、TC-02 通过，2026-11-24） |
-| L2 主流程 | 局域网配对、浏览、重启恢复 | ⛔ 未执行（缺 `dsh-mobile` 插件，没有配对链接） |
+| L2 主流程 | 局域网配对、浏览、重启恢复 | ✅ 已执行（2026-11-24：配对、ArkWeb 浏览、重启恢复、电脑端设备列表通过） |
 | L3 失败路径 | 错误 token、过期、撤销、限流、证书错误 | ⛔ 未执行 |
 | L4 环境变化 | 网络切换、后台/前台、会话过期 | ⛔ 未执行 |
 | L5 远程与安全 | 公网证书入口、自签名远程入口、负向证书实验 | ⛔ 未执行 |
@@ -526,7 +528,8 @@
 | 签名 | DevEco Studio 自动签名：调试证书 + `type = debug` 的 Profile，`bundle-name = io.github.crazyjason.dshmobile.hmos`，有效期 2026-11-24 → 2027-11-24 |
 | 安装 | `pwsh -File scripts/install.ps1` → `msg:install bundle successfully` |
 | 网络 | 手机 `wlan0 = 192.168.100.34/24`，电脑 WLAN `192.168.100.30/24`（同网段） |
-| 电脑端 | 本机 DSH 的 profile **未安装** `dsh-mobile` 插件，没有配对链接可生成 |
+| 电脑端（第一轮 L1） | 本机 DSH 的 profile **未安装** `dsh-mobile` 插件，没有配对链接可生成 |
+| 电脑端（第二轮 L2） | 已装 `dsh-mobile@0.8.15`（npm，Apache-2.0），局域网入口 `https://192.168.100.30:3443`，私有 CA 指纹 `5499beae…d0bd`（= 配对链接里的 `instance`），Windows 防火墙已加 `DSH Mobile HTTPS` / `DSH Mobile Discovery` 两条入站规则 |
 | 取证方式 | `hdc shell snapshot_display` 截图、`uitest uiInput click` 注入点击、`uitest dumpLayout` 读控件树、`hilog -T DshMobile -x` 抓日志 |
 
 ### 11.2 本轮执行结果
@@ -536,11 +539,16 @@
 | TC-01 安装与首次启动 | **PASS** | 安装成功；启动显示深色界面与空状态「还没有配对的电脑」＋「添加电脑」＋「运行协议自检」；无白屏、无崩溃；**未出现任何权限授权弹窗**（只声明 `INTERNET` / `GET_NETWORK_INFO`，均为安装即授予） |
 | TC-02 设备端协议自检 | **PASS** | 点「运行协议自检」弹出：标题「协议自检通过」，正文「20 项检查全部通过，当前安装的构建与桌面插件协议一致。」 |
 | 局域网扫描（TC-06 前半段） | **PASS**（无插件环境） | 点「扫描局域网」后按钮变「扫描中…」并显示「正在搜索运行 DSH Mobile 插件的电脑…」；约 7 秒后回到空闲，toast「未发现电脑，请确认两者在同一网络」；无崩溃 |
-| TC-04 起的配对/浏览用例 | **BLOCKED** | 电脑端没有 `dsh-mobile` 插件，无法生成配对链接 |
+| TC-04 局域网配对（legacy 链接） | **PASS**（用 `dsh2` 密钥 + 手动地址） | 电脑端 `pairing/open` 返回 `https://192.168.100.30:3443/mobile-access/pair#instance=5499…&token=…`；手机端填入 `dsh2.<instance>.<token>` + 地址后配对成功，列表出现「192.168.100.30 / 局域网 / :3443 / 可达 · 刚刚」。日志序列：`pair: pairing CA fetched` → `pairing CA: basicConstraints=-1 … withinValidity=true` → `pair: served CA matches the pairing key` → `paired a DSH Mobile gateway` |
+| TC-05 `dsh2` 自签入口（CA 固定路径） | **PASS** | 配对走的就是 `dsh2` 分支：手机用 `SKIP` 取 `/mobile-access/ca.cer`，`SHA-256(CA) == instance`，再用该 CA 做 `PINNED` 请求完成 `native-pair`（自签证书场景） |
+| TC-19 浏览（ArkWeb 会话） | **PASS** | 点设备卡片进入 ArkWeb，顶部显示 `DeepSeek Harness / 192.168.100.30:3443`，页面加载出真实的 DSH 界面：预览版说明弹窗 →「继续」→ 主页（「探索未至之境」、工作区 `dsh-hmos-mobile`、标准模式、输入框）。说明会话 Cookie 注入与自签 TLS 续接都生效 |
+| 重启恢复（进程被杀后） | **PASS** | `aa force-stop` 后重新启动，设备列表仍显示该电脑且状态「可达」，说明设备记录、CA、探活路径都在重启后恢复 |
+| 电脑端设备列表 | **PASS** | `GET /api/mobile-access/lan/devices` 返回 1 台设备：`label = DeepSeek Harness HarmonyOS`，`createdAt`/`lastSeenAt` 与配对时刻一致，凭据有效期约 90 天 |
+| TC-06 起的其余用例 | **未执行** | 撤销、限流、会话过期、网络切换、远程入口、负向证书实验等仍未执行 |
 
 ### 11.3 本轮缺陷（已修复）
 
-四个缺陷都是**只有真机才能暴露**的，模拟器和编译期都发现不了：
+五个缺陷都是**只有真机才能暴露**的，模拟器和编译期都发现不了：
 
 | 编号 | 现象 | 根因 | 修复 |
 | --- | --- | --- | --- |
@@ -548,11 +556,36 @@
 | D-02 | 底部导航条区域是一条**白条**，与深色界面割裂 | 该区域实际绘制的是**窗口背景**，只设 `setWindowSystemBarProperties({ navigationBarColor })` 不够（该调用本身成功、无报错） | `loadContent` 后补 `setWindowBackgroundColor('#0B0E14')`（`entryability/EntryAbility.ets`） |
 | D-03 | 协议自检弹窗、toast 是浅色主题，浮在深色界面上很突兀 | 应用界面固定深色，但没有声明色彩模式，系统组件仍按设备主题（浅色）绘制 | `onCreate` 中 `setColorMode(COLOR_MODE_DARK)`（`entryability/EntryAbility.ets`） |
 | D-04 | `hilog -T DshMobile` 一条应用日志都收不到 | ability 层直接调用 `hilog.info(0x0000, ...)`；domain `0x0000` 的日志在 HarmonyOS 7 上被丢弃，启动/窗口错误日志全部丢失（`system bar styling unavailable` 这类告警也看不到） | 改走 `common/Log.ets`（domain `0x0D5B` + 脱敏），并给 `Log` 增加 ability 层用法（`entryability/EntryAbility.ets`） |
+| D-05 | **所有**局域网配对失败，提示「证书校验失败：网关证书与配对信息不一致」 | `X509Cert.getBasicConstraints()` 返回的是**路径长度**，HarmonyOS 对「CA:TRUE 且省略 pathLenConstraint」的证书返回 `-1`；代码把 `< 0` 当作“不是 CA”直接拒绝，而 `dsh-mobile` 生成的配对 CA 恰好没有该可选字段。真机日志：`pairing CA: basicConstraints=-1 … withinValidity=true` → `basic constraints do not allow the CA role` | 不再拿基本约束当门禁：保留「指纹 == instanceId + 有效期 + 自签名验签」，仅记录该值供排障（`protocol/CertPin.ets`，说明见 [ARCHITECTURE §9.2](ARCHITECTURE.md#92-bootstrap-链路)） |
 
-复验方式（本轮已执行）：改完重新 `build.ps1` → `install.ps1` → `aa start` → 截图比对；D-04 复验后日志出现 `I A00D5B/…/DshMobile: EntryAbility onCreate`。
+**由此顺带补的可诊断性**：TLS 失败原先只折叠成一句用户提示，没有任何设备端日志。现在 `TlsHttp.ets` 会记录 socket 错误码，
+`AppService.pair` 会记录「CA 是否取到 / 是否匹配 / 最终失败类别」，`CertPin.validatePairingCa` 会记录基本约束与有效期判定——
+D-05 就是靠这三条日志在真机上一轮定位的。
+
+复验方式（本轮已执行）：改完重新 `build.ps1` → `install.ps1` → `aa start` → 截图比对；D-04 复验后日志出现 `I A00D5B/…/DshMobile: EntryAbility onCreate`，D-05 复验后出现 `paired a DSH Mobile gateway`。
 
 ### 11.4 本轮未覆盖
 
-- 配对、TLS/证书固定、ArkWeb 浏览、重启恢复、撤销、限流、网络切换：**全部未执行（BLOCKED）**，原因是电脑端没有 `dsh-mobile` 插件。
-- 要继续 L2 起，需要先在电脑端 DSH 安装并启用 `dsh-mobile` 插件、打开「移动访问」，拿到配对链接后再按 §3 往下执行。
-- 按 §10 的约定，**下次任何构建变更后先重跑 TC-01、TC-02**，再继续后面的用例。
+- **已覆盖**：安装、启动、空状态、协议自检、局域网配对（含 `dsh2`/CA 固定路径）、ArkWeb 浏览、重启恢复、电脑端设备列表。
+- **仍未执行**：撤销设备、限流、配对码过期/复用、错误 token、会话过期与续期、网络切换（换 Wi-Fi/热点）、远程入口（FRP/cloudflared/cpolar/iroh）、负向证书实验（TC-18B 等）、ArkWeb 的 SSL 续接负向路径。
+- 继续执行前，电脑端需要保持 `dsh-mobile` 的局域网入口开启；每次配对应重新生成配对码（有效期约 2 分钟）。
+- 按 §10 的约定，**下次任何构建变更后先重跑 TC-01、TC-02、TC-04、TC-19**，再继续后面的用例。
+
+### 11.5 本轮新增的自动化测试手法（可复用）
+
+真机用例不一定要手点，以下组合可以脚本化执行（本轮配对/浏览就是这么跑完的）：
+
+| 能力 | 命令 |
+| --- | --- |
+| 截图取证 | `hdc shell snapshot_display -f /data/local/tmp/x.jpeg` + `hdc file recv` |
+| 点击/长按/按键 | `hdc shell uitest uiInput click <x> <y>`、`longClick`、`keyEvent Back/Home` |
+| 输入文本 | `hdc shell uitest uiInput inputText <x> <y> <text>` |
+| 读控件树 | `hdc shell uitest dumpLayout -p /data/local/tmp/l.json` + `hdc file recv`（含 `text`/`bounds`，能精确定位坐标） |
+| 启停应用 | `hdc shell aa start -a EntryAbility -b io.github.crazyjason.dshmobile.hmos`、`aa force-stop` |
+| 抓日志 | `hdc shell hilog -T DshMobile -x`（必须带 `-x`，否则永久阻塞） |
+
+两个坑：
+
+- `uitest uiInput inputText` **单次最多注入约 120 字符**。配对链接（`https://…/pair#instance=…&token=…`，约 170 字符）一次填不进去，
+  稳妥做法是改用 `dsh2.<64hex>.<43char>` 密钥（113 字符）+ 手动地址，这条路径本身也是受支持的配对入口。
+- 点击前先 `dumpLayout` 拿真实 bounds。软键盘弹出会顶起布局，直接点固定坐标容易点空（本轮就点空过一次）。
