@@ -268,21 +268,28 @@ D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe
 & 'D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe' uninstall io.github.crazyjason.dshmobile.hmos
 ```
 
+> **坑（已实测）**：hdc 3.2.0f 把安装失败写在 stdout（`msg:error: failed to install bundle. code:9568320 ...`），
+> 但**进程退出码仍是 0**。直接 `& $hdc install` 无法用 `$LASTEXITCODE` 判定成败，必须检查输出文本。
+> `scripts/install.ps1` 已经按这个事实处理：输出里出现 `error`/`fail` 就抛错并以非 0 退出。
+
 ### 6.3 查看运行日志
 
 ```powershell
 # 只看本项目日志（hilog tag = DshMobile，domain = 0x0D5B）
-& 'D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe' shell hilog -T DshMobile
+& 'D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe' shell hilog -T DshMobile -x
 
 # 清空后重新抓取，便于复现单次问题
 & 'D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe' shell hilog -r
 ```
+
+> `-x` 表示“读完缓冲区就退出”。不带 `-x` 时 `hilog -T DshMobile` 会持续流式输出、永不退出，在脚本里会把命令挂死。
 
 ### 6.4 安装失败的常见原因
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
 | `signature verify failed` / 安装被拒 | 使用了 unsigned HAP，或签名与 Profile 不匹配 | 用 DevEco 自动签名重新构建；确认安装的是签名后的 HAP |
+| `code:9568320 error: no signature file` | 把 unsigned 产物直接装机（**已实测**：Mate 60 Pro+ / HarmonyOS 7.0.0） | unsigned 只能用于编译验证；装真机前必须先签名 |
 | 设备未出现在 `hdc list targets` | USB 调试未开、线材仅充电、驱动异常 | 换线/换口，重新授权调试 |
 | 安装成功但无法启动 | 签名 Profile 不包含该设备（调试 Profile 设备列表） | 在 AppGallery Connect/DevEco 中把设备加入调试 Profile |
 | bundleName 冲突 | 手机上已装同 bundleName 的其他版本 | `hdc uninstall io.github.crazyjason.dshmobile.hmos` 后重装 |
@@ -316,7 +323,24 @@ D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe
 | 验证机器 | 本项目开发机（Windows，DevEco Studio 26.0.0，SDK API 26，hvigor 6.26.9，JDK 17） |
 | 执行的命令 | 3.1 节中的完整命令行（`assembleHap --no-daemon`）；同一命令也已由 `scripts/build.ps1` 封装验证 |
 | 结果 | 命令成功结束，生成 `entry/build/default/outputs/default/entry-default-unsigned.hap` |
-| 结论 | **ArkTS 源码可编译、可组装成 HAP**；产物为未签名包，不能安装 |
-| 未做 | 未在真机安装、未启动应用、未做配对/浏览/证书/网络切换验收（见 [TESTING.md](TESTING.md)） |
+| 结论 | **ArkTS 源码可编译、可组装成 HAP**；命令行不带签名配置时产物仍是未签名包，不能安装 |
+| 真机侧 | 见 [8.1](#81-真机侧记录)：签名安装、启动、协议自检已验证；配对/浏览/证书/网络切换仍未验证（见 [TESTING.md](TESTING.md)） |
 
-> 该记录只覆盖“编译成 HAP”。任何关于运行时行为的描述都需要真机测试证据，不要用构建成功代替真机验收。
+### 8.1 真机侧记录
+
+| 项目 | 结果 |
+| --- | --- |
+| 设备 | HUAWEI Mate 60 Pro+（`ALN-AL10`），HarmonyOS `7.0.0.111(SP10C00E111R4P3)`，API 26，hdc `3.2.0f` |
+| 连接 | `hdc list targets` 可见设备；`bm get --udid` 可读（USB 调试已授权） |
+| unsigned 安装 | ⛔ 失败：`code:9568320 error: no signature file`（附带确认 hdc 退出码为 0，见 6.2 的坑） |
+| 已签名安装 | ✅ 2026-11-24 成功：DevEco 自动签名生成的 `entry-default-signed.hap`（423,005 B）经 `scripts/install.ps1` 安装，输出 `msg:install bundle successfully` |
+| 签名材料 | 调试证书 + `type = debug` Profile，`bundle-name = io.github.crazyjason.dshmobile.hmos`，设备白名单包含该机 UDID，有效期 2026-11-24 → 2027-11-24 |
+| 安装后运行 | ✅ 启动、空状态、协议自检（20 项）通过；详见 [TESTING.md §11](TESTING.md#11-执行记录2026-11-24-第一轮) |
+
+> **自动签名的副作用**：DevEco 勾选「自动生成签名」后会**就地改写** `build-profile.json5`，写入本机绝对路径
+> 和 IDE 加密过的口令。该文件在版本控制里，**提交前必须还原**（`git checkout -- build-profile.json5`），
+> 否则会把本机签名配置带进仓库。签名材料本身（`.p12` / `.cer` / `.p7b`）位于 `%USERPROFILE%\.ohos\config\`，
+> 被 `.gitignore` 排除，不会入库。`scripts/verify.ps1` 会在静态校验阶段拦下带 `signingConfigs` 的
+> `build-profile.json5`。
+
+> 第 8 节只覆盖“编译成 HAP”，8.1 只覆盖“装得上、跑得起来、纯解析自检通过”。任何关于**联网行为**（配对、TLS、浏览、会话、网络切换）的描述都需要对应的真机用例证据，不要用构建成功或启动成功代替功能验收。

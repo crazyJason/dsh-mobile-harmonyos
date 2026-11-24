@@ -1,12 +1,13 @@
 # 真机测试计划
 
-本文是一份**尚未执行**的 HarmonyOS NEXT 真机手工测试计划，覆盖配对、浏览、证书、网络与生命周期场景，并规定缺陷报告需要采集的信息。
+本文是 HarmonyOS NEXT 真机手工测试计划，覆盖配对、浏览、证书、网络与生命周期场景，并规定缺陷报告需要采集的信息。
 
-> ⛔ **执行状态：未执行（NOT EXECUTED）**
+> 🟡 **执行状态：部分执行（2026-11-24 第一轮真机）**
 >
-> - 本仓库目前只完成了**本机编译验证**：命令行 `assembleHap` 生成了 `entry/build/default/outputs/default/entry-default-unsigned.hap`（见 [BUILD.md](BUILD.md#8-构建验证记录)）。
-> - 没有任何一条用例在真机上运行过，**设备端「协议自检」也尚未在真机执行**；本文的“预期结果”全部来自协议规范与代码阅读，不是实测结论。
-> - 在真机上跑完本计划之前，README 中的“功能范围”只能理解为“代码已实现”，不能理解为“设备上可用”。
+> - **L1 已执行**：TC-01（安装/启动/空状态）、TC-02（设备端协议自检，20 项全部通过）在真机上通过，记录见 [§11](#11-执行记录2026-11-24-第一轮)。
+> - 该轮发现并已修复 4 个**只有真机才能暴露**的缺陷（全角加号字形、底部导航条白条、系统弹窗浅色、启动日志不可见），见 [§11.3](#113-本轮缺陷已修复)。
+> - **L2–L5 仍未执行**：电脑端尚未安装 `dsh-mobile` 插件，无法生成配对链接，配对、浏览、证书、网络切换全部仍属未验证状态。
+> - 因此 README 中的“功能范围”目前仍只能理解为“代码已实现”，不等于“设备上可用”。
 
 - [0. 测试前置条件](#0-测试前置条件)
 - [1. 测试分级与执行顺序](#1-测试分级与执行顺序)
@@ -58,9 +59,9 @@
 
 | 级别 | 内容 | 状态 |
 | --- | --- | --- |
-| L0 构建 | 命令行构建出 HAP | ✅ 已执行（仅编译，无真机） |
-| L1 基础可用性 | 安装、启动、空列表、**协议自检（首个冒烟检查）** | ⛔ 未执行 |
-| L2 主流程 | 局域网配对、浏览、重启恢复 | ⛔ 未执行 |
+| L0 构建 | 命令行构建出 HAP | ✅ 已执行（编译 + 签名 + 装机） |
+| L1 基础可用性 | 安装、启动、空列表、**协议自检（首个冒烟检查）** | ✅ 已执行（TC-01、TC-02 通过，2026-11-24） |
+| L2 主流程 | 局域网配对、浏览、重启恢复 | ⛔ 未执行（缺 `dsh-mobile` 插件，没有配对链接） |
 | L3 失败路径 | 错误 token、过期、撤销、限流、证书错误 | ⛔ 未执行 |
 | L4 环境变化 | 网络切换、后台/前台、会话过期 | ⛔ 未执行 |
 | L5 远程与安全 | 公网证书入口、自签名远程入口、负向证书实验 | ⛔ 未执行 |
@@ -448,8 +449,14 @@
 & 'D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe' shell hilog -r
 
 # 只抓本项目（tag = DshMobile，domain = 0x0D5B）
-& 'D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe' shell hilog -T DshMobile
+& 'D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe' shell hilog -T DshMobile -x
 ```
+
+> `-x`（非阻塞读，打印完缓冲区即退出）**必须带**。不带 `-x` 时 `hilog -T DshMobile` 会一直流式输出不退出，
+> 在脚本或 CI 里会把命令挂死；要实时看日志再手动去掉 `-x`。
+>
+> 另外：日志 domain 必须是 `0x0D5B`。用 `0x0000` 打日志在 HarmonyOS 7 上**看不到**（第一轮真机踩过，
+> 见 [§11.3](#113-本轮缺陷已修复) D-04），所以 ability 层也必须走 `common/Log.ets` 而不是直接调 `hilog`。
 
 如需同时观察 ArkWeb/系统错误，可抓取全部日志后自行裁剪，但**提交前必须脱敏**。
 
@@ -501,3 +508,51 @@
 - L5 需要额外的入口配置，若环境不具备必须在报告中注明；
 - 每次构建变更后至少重跑 L1、L2 的冒烟用例（TC-01、TC-02、TC-04、TC-19、TC-24）；
 - 报告开头必须写明“**本轮测试是否在真机执行**”，避免把构建成功误当成功能验收。
+
+---
+
+## 11. 执行记录（2026-11-24 第一轮）
+
+### 11.1 环境与版本
+
+| 项 | 值 |
+| --- | --- |
+| 执行时间 | 2026-11-24 20:41–21:00（Asia/Shanghai） |
+| 手机 | HUAWEI Mate 60 Pro+，型号 `ALN-AL10` |
+| 系统 | HarmonyOS `7.0.0.111(SP10C00E111R4P3)`，`const.ohos.apiversion = 26` |
+| 设备 UDID | `DDA880E5…0E21`（已在该机调试 Profile 的 `debug-info.device-ids` 白名单内） |
+| hdc | `3.2.0f`（DevEco Studio 26.0.0 自带 SDK） |
+| 构建 | `pwsh -File scripts/build.ps1` → `entry-default-signed.hap`（423,005 B） |
+| 签名 | DevEco Studio 自动签名：调试证书 + `type = debug` 的 Profile，`bundle-name = io.github.crazyjason.dshmobile.hmos`，有效期 2026-11-24 → 2027-11-24 |
+| 安装 | `pwsh -File scripts/install.ps1` → `msg:install bundle successfully` |
+| 网络 | 手机 `wlan0 = 192.168.100.34/24`，电脑 WLAN `192.168.100.30/24`（同网段） |
+| 电脑端 | 本机 DSH 的 profile **未安装** `dsh-mobile` 插件，没有配对链接可生成 |
+| 取证方式 | `hdc shell snapshot_display` 截图、`uitest uiInput click` 注入点击、`uitest dumpLayout` 读控件树、`hilog -T DshMobile -x` 抓日志 |
+
+### 11.2 本轮执行结果
+
+| 用例 | 结果 | 实际现象 |
+| --- | --- | --- |
+| TC-01 安装与首次启动 | **PASS** | 安装成功；启动显示深色界面与空状态「还没有配对的电脑」＋「添加电脑」＋「运行协议自检」；无白屏、无崩溃；**未出现任何权限授权弹窗**（只声明 `INTERNET` / `GET_NETWORK_INFO`，均为安装即授予） |
+| TC-02 设备端协议自检 | **PASS** | 点「运行协议自检」弹出：标题「协议自检通过」，正文「20 项检查全部通过，当前安装的构建与桌面插件协议一致。」 |
+| 局域网扫描（TC-06 前半段） | **PASS**（无插件环境） | 点「扫描局域网」后按钮变「扫描中…」并显示「正在搜索运行 DSH Mobile 插件的电脑…」；约 7 秒后回到空闲，toast「未发现电脑，请确认两者在同一网络」；无崩溃 |
+| TC-04 起的配对/浏览用例 | **BLOCKED** | 电脑端没有 `dsh-mobile` 插件，无法生成配对链接 |
+
+### 11.3 本轮缺陷（已修复）
+
+四个缺陷都是**只有真机才能暴露**的，模拟器和编译期都发现不了：
+
+| 编号 | 现象 | 根因 | 修复 |
+| --- | --- | --- | --- |
+| D-01 | 右上角「添加」按钮里的加号显示成一个白色小方块 | 源码用的是全角加号 `U+FF0B`，设备字体栈里没有该字形，回退渲染成小方块 | 改用 ASCII `+`，字号 20 → 24（`pages/Index.ets`） |
+| D-02 | 底部导航条区域是一条**白条**，与深色界面割裂 | 该区域实际绘制的是**窗口背景**，只设 `setWindowSystemBarProperties({ navigationBarColor })` 不够（该调用本身成功、无报错） | `loadContent` 后补 `setWindowBackgroundColor('#0B0E14')`（`entryability/EntryAbility.ets`） |
+| D-03 | 协议自检弹窗、toast 是浅色主题，浮在深色界面上很突兀 | 应用界面固定深色，但没有声明色彩模式，系统组件仍按设备主题（浅色）绘制 | `onCreate` 中 `setColorMode(COLOR_MODE_DARK)`（`entryability/EntryAbility.ets`） |
+| D-04 | `hilog -T DshMobile` 一条应用日志都收不到 | ability 层直接调用 `hilog.info(0x0000, ...)`；domain `0x0000` 的日志在 HarmonyOS 7 上被丢弃，启动/窗口错误日志全部丢失（`system bar styling unavailable` 这类告警也看不到） | 改走 `common/Log.ets`（domain `0x0D5B` + 脱敏），并给 `Log` 增加 ability 层用法（`entryability/EntryAbility.ets`） |
+
+复验方式（本轮已执行）：改完重新 `build.ps1` → `install.ps1` → `aa start` → 截图比对；D-04 复验后日志出现 `I A00D5B/…/DshMobile: EntryAbility onCreate`。
+
+### 11.4 本轮未覆盖
+
+- 配对、TLS/证书固定、ArkWeb 浏览、重启恢复、撤销、限流、网络切换：**全部未执行（BLOCKED）**，原因是电脑端没有 `dsh-mobile` 插件。
+- 要继续 L2 起，需要先在电脑端 DSH 安装并启用 `dsh-mobile` 插件、打开「移动访问」，拿到配对链接后再按 §3 往下执行。
+- 按 §10 的约定，**下次任何构建变更后先重跑 TC-01、TC-02**，再继续后面的用例。

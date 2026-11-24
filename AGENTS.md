@@ -70,11 +70,17 @@ pwsh -File scripts/verify.ps1 -SkipBuild
 | 项 | 状态 |
 | --- | --- |
 | 命令行构建 | ✅ 已验证（Windows 11 / DevEco Studio 26.0.0 / SDK API 26 / hvigor 6.26.9 / JDK 17） |
-| 真机安装 | ⛔ 未验证（产物是 **unsigned** HAP，装不上） |
-| 配对 / TLS / 网络切换 | ⛔ 未验证，`docs/TESTING.md` 有 **31 个编号用例（含 B 变体共 35 条）**待执行 |
+| 真机安装 | ✅ 已验证（2026-11-24，HUAWEI Mate 60 Pro+ / HarmonyOS 7.0.0.111 / API 26，DevEco 自动签名的 debug Profile；见 `docs/BUILD.md` §8.1）。**不带签名配置的命令行构建产物仍是 unsigned，装不上** |
+| 真机启动 / 协议自检 | ✅ TC-01、TC-02 通过（自检 20 项全过）；真机上发现并修复 4 个缺陷（全角加号字形、底部导航条白条、弹窗浅色、启动日志不可见），见 `docs/TESTING.md` §11 |
+| 配对 / TLS / 浏览 / 网络切换 | ⛔ 未验证：电脑端尚未安装 `dsh-mobile` 插件，拿不到配对链接。`docs/TESTING.md` 共 35 条用例，目前只有 TC-01、TC-02 与一次无插件扫描冒烟被执行 |
 | 自动化测试 | ❌ 无 `ohosTest`；唯一的自动检查是 `scripts/verify.ps1` |
 | 已知安全缺口 | 远程降级保护（`preserveRemotePin`）**已实现但未接入配对流程**：同一远程电脑若曾固定 CA，用不要求 CA 的密钥重配对且 `ca.cer` 返回 404 时，可能回退平台信任库。见 [ADR-0002](docs/adr/0002-trust-root-is-instance-id.md)、[ARCHITECTURE §15](docs/ARCHITECTURE.md#15-已知缺口与后续工作)、[TESTING TC-18B](docs/TESTING.md) |
 | 依赖 | 无第三方 ohpm 依赖，不需要联网 `ohpm install` |
+
+**日志与签名的两条真机结论（都踩过）**：
+
+- ability 层也必须走 `common/Log.ets`（domain `0x0D5B`）；用 `hilog.info(0x0000, ...)` 在 HarmonyOS 7 上**一条都收不到**。`verify.ps1` 会拦直接调用 `hilog` 的文件。
+- DevEco「自动生成签名」会**就地改写** `build-profile.json5`，写入本机绝对路径和加密口令。提交前必须 `git checkout -- build-profile.json5`；`verify.ps1` 会在静态校验阶段拦下带 `signingConfigs` 的版本。
 
 **因此：任何涉及协议、证书、网络、权限的改动，都必须在该提交里写明「哪些 TC 用例需要人工复测」。** 没有这条说明的协议层改动视为未完成。
 
