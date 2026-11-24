@@ -183,6 +183,8 @@ dsh2 片段:     ^key=dsh2\.[a-f0-9]{64}\.[A-Za-z0-9_-]{43}$
 - **远程模式**：先尝试 `/ca.cer`。有 CA → 校验并固定；明确 404 → 仅当 `target.remote === true` 且密钥不要求 CA（公网证书入口）时使用系统信任库；其他错误（网络、TLS、5xx）应当**向上抛出**，不能当作 404 处理。私网入口即使密钥不要求 CA，404 也必须失败。
 - **降级保护**：若本地已有同一 `instanceId` 且保存了 CA 的远程记录，新的配对必须把 `requiresCa` 置为 true（即使新密钥不要求 CA）。
 
+  > **实现状态**：该规则已在 `PairingKey.ets` 的 `preserveRemotePin` 中实现，但**尚未接入配对流程**（缺口登记见 [ARCHITECTURE.md](ARCHITECTURE.md#15-已知缺口与后续工作)，验证用例见 [TESTING.md](TESTING.md) 的 TC-18B）。接线之前，本条不得视为对本客户端的已生效约束。
+
 > 实现注记：本仓库的 HarmonyOS 客户端与上游 `PairingTrust.selectTrustAnchor` 保持一致——私网（LAN）入口必须提供并校验 `ca.cer`，缺失即按身份不匹配失败；只有公网证书远程入口（密钥不要求 CA 且 `ca.cer` 明确 404）才允许使用平台信任库。判定入口类型的规则见 [ARCHITECTURE.md](ARCHITECTURE.md#15-已知缺口与后续工作)。
 
 ### 3.4 解析规则

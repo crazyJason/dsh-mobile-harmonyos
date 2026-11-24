@@ -71,8 +71,9 @@ pwsh -File scripts/verify.ps1 -SkipBuild
 | --- | --- |
 | 命令行构建 | ✅ 已验证（Windows 11 / DevEco Studio 26.0.0 / SDK API 26 / hvigor 6.26.9 / JDK 17） |
 | 真机安装 | ⛔ 未验证（产物是 **unsigned** HAP，装不上） |
-| 配对 / TLS / 网络切换 | ⛔ 未验证，`docs/TESTING.md` 有 **31 个编号用例（含 B 变体共 34 条）**待执行 |
+| 配对 / TLS / 网络切换 | ⛔ 未验证，`docs/TESTING.md` 有 **31 个编号用例（含 B 变体共 35 条）**待执行 |
 | 自动化测试 | ❌ 无 `ohosTest`；唯一的自动检查是 `scripts/verify.ps1` |
+| 已知安全缺口 | 远程降级保护（`preserveRemotePin`）**已实现但未接入配对流程**：同一远程电脑若曾固定 CA，用不要求 CA 的密钥重配对且 `ca.cer` 返回 404 时，可能回退平台信任库。见 [ADR-0002](docs/adr/0002-trust-root-is-instance-id.md)、[ARCHITECTURE §15](docs/ARCHITECTURE.md#15-已知缺口与后续工作)、[TESTING TC-18B](docs/TESTING.md) |
 | 依赖 | 无第三方 ohpm 依赖，不需要联网 `ohpm install` |
 
 **因此：任何涉及协议、证书、网络、权限的改动，都必须在该提交里写明「哪些 TC 用例需要人工复测」。** 没有这条说明的协议层改动视为未完成。
@@ -109,7 +110,7 @@ build: 固定 hvigor 版本
 - Windows 上工程放在受保护目录或路径过深会构建失败；`E:\aicode\` 这类普通目录是安全的。
 - 文档统一 **UTF-8 + LF**（由 [`.gitattributes`](.gitattributes) 约束），不要引入 CRLF 造成假 diff。
 - 仓库名是 `dsh-mobile-harmonyos`；**本地目录可能仍叫 `dsh-hmos-mobile`**（历史名称），`docs/BUILD.md` 里的绝对路径是本地路径，不是仓库名。
-- `bundleName` 仍沿用上游作者的命名空间，**改它会等于换一个 App**（旧包无法覆盖安装），详见 [ADR-0004](docs/adr/0004-repo-name-and-bundle-namespace.md)。
+- `bundleName` 是 `io.github.crazyjason.dshmobile.hmos`（2026-11-24 于首次真机安装前从上游命名空间改到维护者命名空间），**再改它会等于换一个 App**（旧包无法覆盖安装，只能卸载重装并重新配对），详见 [ADR-0004](docs/adr/0004-repo-name-and-bundle-namespace.md)。
 
 ## 9. 文档索引
 
@@ -119,5 +120,5 @@ build: 固定 hvigor 版本
 | [`docs/BUILD.md`](docs/BUILD.md) | 环境、构建、签名、安装、常见构建错误 |
 | [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | **改任何协议相关代码之前必读**：URL、接口、字段、Cookie、错误码 |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 模块划分、线程与生命周期、证书固定设计、与 Android 对照 |
-| [`docs/TESTING.md`](docs/TESTING.md) | 真机验证：34 条用例（TC-01…TC-31，含 B 变体）、分级执行顺序、缺陷采集要求 |
+| [`docs/TESTING.md`](docs/TESTING.md) | 真机验证：35 条用例（TC-01…TC-31，含 B 变体）、分级执行顺序、缺陷采集要求 |
 | [`docs/adr/`](docs/adr/README.md) | 已定型的架构决策与「为什么不能那样改」 |
