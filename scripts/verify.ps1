@@ -141,7 +141,7 @@ foreach ($config in @('AppScope/app.json5', 'build-profile.json5', 'entry/build-
 # ------------------------------------------------------------- line endings
 Section '3. Text hygiene (UTF-8 + LF)'
 $textFiles = Get-ChildItem -Recurse -File -Include *.ets, *.ts, *.json5, *.json, *.ps1, *.md |
-  Where-Object { $_.FullName -notmatch '\\build\\|\\\.research\\|\\\.git\\|\\\.hvigor\\|\\oh_modules\\|\\node_modules\\' }
+  Where-Object { $_.FullName -notmatch '\\build\\|\\\.research\\|\\\.git\\|\\\.hvigor\\|\\oh_modules\\|\\node_modules\\|\\\.notes\\' }
 $withCr = @()
 $withBom = @()
 foreach ($file in $textFiles) {
@@ -161,6 +161,14 @@ Section '4. Secrets and artifacts'
 $signing = Get-ChildItem -Recurse -File -Include *.p12, *.p7b, *.keystore, *.jks, *.pfx, *.csr, *.pem, *.cer, *.key |
   Where-Object { $_.FullName -notmatch '\\\.git\\|\\\.research\\|\\build\\' }
 if ($signing.Count -eq 0) { Pass 'no signing material in the tree' } else { Fail 'signing material present' ($signing.FullName -join ', ') }
+
+# DevEco "automatically generate signature" rewrites build-profile.json5 with machine-local paths
+# and IDE-encrypted passwords. That must stay local: revert the file before committing.
+if ((Get-Content 'build-profile.json5' -Raw) -match 'signingConfigs') {
+  Fail 'build-profile.json5 carries a signingConfig' 'run `git checkout -- build-profile.json5` (auto signing writes machine-local paths + passwords)'
+} else {
+  Pass 'build-profile.json5 carries no signing config'
+}
 
 $gitAvailable = $null -ne (Get-Command git -ErrorAction SilentlyContinue)
 if ($gitAvailable) {
@@ -207,6 +215,15 @@ if ($logSource.Contains('sanitize')) {
 }
 $logCalls = $etsFiles | Select-String -Pattern 'Log\.(info|warn|error)\([^)]*deviceToken|Log\.(info|warn|error)\([^)]*sessionToken|Log\.(info|warn|error)\([^)]*csrfToken' -List
 if ($null -eq $logCalls) { Pass 'no credential named in a log call' } else { Fail 'credential logged' (($logCalls | ForEach-Object { $_.Path.Replace("$root\", '') }) -join ', ') }
+
+# hilog with domain 0x0000 is silently dropped on HarmonyOS 7 (verified on a real Mate 60 Pro+),
+# so every call must go through Log.ets, which pins domain 0x0D5B.
+$rawHilog = $etsFiles | Select-String -Pattern 'hilog\.(info|warn|error|debug)\(' | Where-Object { $_.Path -notmatch '\\common\\Log\.ets$' }
+if ($rawHilog.Count -eq 0) {
+  Pass 'hilog is only called from common/Log.ets (domain 0x0D5B)'
+} else {
+  Fail 'direct hilog call' (($rawHilog | ForEach-Object { "$($_.Path.Replace("$root\", '')):$($_.LineNumber)" }) -join ', ')
+}
 
 # --------------------------------------------------------------- documentation
 Section '6. Documentation links'
