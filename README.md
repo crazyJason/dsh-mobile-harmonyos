@@ -37,7 +37,7 @@
 
 | 能力 | 说明 |
 | --- | --- |
-| 配对链接解析 | 支持 `key=dsh2.*` 片段与旧版 `instance=...&token=...` 片段；`dsh1` 密钥本身可解析（识别为“不要求 CA”），但完整 `dsh1` 配对 URL 的流程尚未打通，见[已知限制](#已知限制) |
+| 配对链接解析 | 接受上游实际生成的两种片段：`key=dsh2.<64hex>.<43char>`（提供自签 CA 的入口）与 `instance=...&token=...`（局域网 / 公网证书 / 旧版）。`#key=dsh1...` 不是上游会写入 URL 的格式，客户端按上游规则拒绝；公网证书入口用 `dsh1` **裸密钥** + 扫描/手填地址配对 |
 | 网关身份校验 | 下载 `/mobile-access/ca.cer`，校验「CA 基本约束 + 自签名 + 有效期 + SHA-256 == instanceId」 |
 | 原生配对 | `POST /mobile-access/auth/native-pair`，拿到 `deviceToken` / `sessionToken` / `csrfToken` |
 | 会话续期与探活 | `native-renew`、`native-probe`，用于恢复连接与判断设备是否被吊销 |
@@ -45,13 +45,13 @@
 | 已配对设备管理 | 元数据存 `@ohos.data.preferences`，设备凭据存 **Asset Store Kit**，列表、重命名、删除 |
 | 网页浏览 | ArkWeb 容器加载已配对 origin 的 DSH 移动端页面，注入 `dsh_ma_*` 会话 Cookie |
 | 失败分类 | 401/403、409、429、`device_revoked` / `device_expired` / `source_network_untrusted` 等给出可读提示 |
-| 设备端协议自检 | 在手机上直接跑 origin/密钥/配对链接的纯规则检查，用于确认安装的构建与协议文档一致 |
+| 设备端协议自检 | 空列表可运行「协议自检」：校验 origin 解析/拒绝、`dsh1`/`dsh2` 密钥、配对 URL 与 legacy 片段、同源 vs `wss:` 固定 authority、ASN.1 证书有效期解析；用于确认安装的构建与协议文档一致 |
 
 **未实现（有意延后或受平台限制）**
 
 | 限制 | 影响 |
 | --- | --- |
-| 无原生扫码 | 需要把电脑上显示的配对链接**复制/粘贴**到手机；相机权限已声明，但扫码 UI 尚未实现 |
+| 无原生扫码 | 需要把电脑上显示的配对链接/密钥**复制/粘贴**到手机；未申请相机权限（manifest 只声明 `INTERNET` / `GET_NETWORK_INFO`），扫码 UI 未实现 |
 | 无原生桥 `window.dshMobileNative` | 页面按上游支持的“浏览器模式”运行；原生能力相关 UI（原生分享、文件选择等）不可用 |
 | 无推送 | 没有 `mobile-push` 注册，后台任务完成/需要确认时不会收到系统通知 |
 | 无 iroh 传输 | 仅支持 HTTPS 直连（局域网 / 自签名 FRP / 公网证书入口），不支持 iroh 点对点通道 |
@@ -63,7 +63,7 @@
 | 上游 Android（`apps/mobile/android/.../io/github/sayach/dshmobile/`） | 本项目 HarmonyOS | 说明 |
 | --- | --- | --- |
 | `GatewayUrlPolicy.kt`（`GatewayOrigin`、`GatewayConnection`） | `protocol/Origin.ets` | HTTPS origin 解析、配对 URL 解析、同源与固定 authority 判定 |
-| `PairingTrust.kt`、`PairingScanPolicy.kt` | `protocol/PairingKey.ets` | 配对 key 解析、`dsh2` 必须带 CA、远程模式保留已保存的 CA 固定 |
+| `PairingTrust.kt`、`PairingScanPolicy.kt` | `protocol/PairingKey.ets` | 配对 key 解析、`dsh2` 必须带 CA、`preserveRemotePin` 降级保护（已实现，尚未接入配对流程） |
 | `PairingTrust.kt`、`PinnedTls.kt`（证书部分） | `protocol/CertPin.ets` | DER↔PEM、SHA-256 指纹、配对 CA 校验、服务端证书链校验 |
 | `NativeAuthClient.kt` | `protocol/GatewayHttp.ets` | `discovery` / `ca.cer` / `metadata` / `native-pair` / `native-renew` / `native-probe` |
 | `PinnedTls.kt`（OkHttp / `SSLSocketFactory`） | `protocol/TlsHttp.ets` | 基于 `TLSSocket` 的手写 HTTPS/1.1 客户端，按请求传入固定 CA |
@@ -71,7 +71,7 @@
 | `PairedDeviceStore.kt`、`DeviceCredentialStore.kt` | `model/DeviceRecord.ets` + `model/DeviceStore.ets` | 设备记录模型；preferences 存元数据，系统密钥库（Asset Store）存凭据 |
 | `MainActivity.kt`（WebView 外壳） | `pages/`（设备列表、添加设备、ArkWeb 容器） | 页面容器、SSL 错误续接、会话 Cookie 注入 |
 | `NativeBridge.kt`、`NativeBridgePolicy.kt` | **未实现** | 页面检测不到 `window.dshMobileNative`，按浏览器模式运行 |
-| `QrDecoder.kt`、`ScanActivity.kt` | **未实现** | 无扫码入口，改为粘贴配对链接 |
+| `QrDecoder.kt`、`ScanActivity.kt` | **未实现** | 无扫码入口，改为粘贴配对链接或裸密钥 |
 
 更完整的模块级说明见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
@@ -122,7 +122,17 @@ entry/build/default/outputs/default/entry-default-unsigned.hap
 - 这是 **unsigned**（未签名）HAP，只能证明编译通过，不能直接安装。
 - 不要用 `hvigorw assembleHap` 依赖 PATH 里恰好存在的 `hvigorw`；使用上面给出的 `node <hvigorw.js>` 绝对路径最稳。
 - 工程没有第三方 ohpm 依赖，不需要联网执行 `ohpm install`（首次构建 hvigor 会自行准备工具链）。
-- 仓库还提供 `scripts/build.ps1`（构建）与 `scripts/install.ps1`（安装/卸载）两个封装脚本，参数与上面的命令一致，详见 [docs/BUILD.md](docs/BUILD.md#35-仓库内辅助脚本)。
+- 仓库还提供 `scripts/build.ps1`（构建，已在本机验证）与 `scripts/install.ps1`（通过 `hdc install -r` 安装/卸载，需要已签名 HAP）两个封装脚本，详见 [docs/BUILD.md](docs/BUILD.md#35-仓库内辅助脚本)。
+
+**交付前验证**（退出码 0 才算通过）：
+
+```powershell
+# 构建 + 静态校验（必需文件、配置、行尾、无签名材料、协议守卫、文档链接）
+pwsh -File scripts/verify.ps1
+
+# 只跑静态校验，跳过构建（秒级，改文档/配置时用）
+pwsh -File scripts/verify.ps1 -SkipBuild
+```
 
 ## 签名与真机安装
 
@@ -153,18 +163,26 @@ hdc install -r entry\build\default\outputs\default\entry-default-signed.hap
 
 前置条件：手机开启「开发者模式」与「USB 调试」，并在弹窗中允许该电脑调试；`hdc` 来自 `D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe`（或 DevEco Studio 自带的 sdk toolchains 目录）。
 
+安装后的冒烟检查：先打开 App，在空设备列表点击「运行协议自检」，**期望全部通过**；未通过时先不要进入配对流程（见 [docs/TESTING.md](docs/TESTING.md) 的 TC-02）。
+
 ## 配对使用流程
 
 前置：电脑已安装 DeepSeek Harness，并在其中安装、启用 `dsh-mobile` 插件，且插件已启动网关。
 
 1. **在电脑上生成配对链接。** 打开插件的手机访问入口/二维码页面，得到形如
-   `https://<host>:3443/mobile-access/pair#key=dsh2.<64位十六进制>.<43位token>` 的链接
-   （公网证书入口是 `dsh1.*`，旧版本插件是 `#instance=<...>&token=<...>`）。
+   `https://<host>:3443/mobile-access/pair#key=dsh2.<64位十六进制>.<43位token>` 的链接（自签 CA 入口），
+   或 `https://<host>:3443/mobile-access/pair#instance=<64位十六进制>&token=<43位token>`（局域网 / 公网证书 / 旧版插件）。
+   上游**不会**生成 `#key=dsh1...` 片段；`dsh1.<...>` 是插件返回的 appKey 形式，可作为裸密钥使用。
 2. **把链接复制到手机。** 当前版本没有原生扫码：用聊天工具/剪贴板把整条链接发到手机并复制。
-3. **在 App 里粘贴。** 打开 DSH Mobile → 「添加设备」→ 粘贴配对链接。App 会：
-   - 严格解析 origin（只接受 `https`，拒绝 userinfo/query/端口越界等）与片段中的配对 key；
+3. **在 App 里粘贴并配对。**
+   - 粘贴**完整链接**：App 直接从链接得到 origin 与配对 key；
+   - 只粘贴**裸密钥**（`dsh2.*` 或 `dsh1.*`）：先点「扫描局域网」选中对应电脑，或在「手动填写」输入 `host:port`（未写端口时补默认 3443）；App 用该地址与裸密钥组成配对目标，并校验扫描结果的 `instanceId` 与密钥一致；
+   - 对**公网证书远程入口**使用 `dsh1` 裸密钥 + 地址：`/mobile-access/ca.cer` 返回 404 时改用平台信任库；局域网/私网入口即使 404 也必须失败（自签入口必须提供并通过指纹校验）。
+
+   App 随后会：
+   - 严格解析 origin（只接受 `https`，拒绝 userinfo/query/端口越界等）与配对 key；
    - 通过未认证的 bootstrap 通道读取 `/mobile-access/discovery` 与 `/mobile-access/ca.cer`；
-   - 校验 CA 的 SHA-256 等于链接里的 `instanceId`，再把该校验过的 CA 作为固定信任锚；
+   - 校验 CA 的 SHA-256 等于 `instanceId`，再把该校验过的 CA 作为固定信任锚（仅公网证书远程入口无 CA 时走系统信任库）；
    - 调用 `native-pair` 换取设备凭据与会话。
 4. **开始浏览。** 回到设备列表，点选刚配对的电脑，App 用 ArkWeb 打开该 origin 的 DSH 移动端页面，并把 `dsh_ma_session` / `dsh_ma_csrf`（以及 `__Host-` 变体）注入为 host-only Cookie。
 5. **再次使用。** 设备记录保存在本地；重新打开 App 或切换网络后，App 用 `native-renew` / `native-probe` 恢复会话，不需要重新配对（除非设备被吊销或凭据过期）。
@@ -176,15 +194,15 @@ hdc install -r entry\build\default\outputs\default\entry-default-signed.hap
 | 设计 | 目的 |
 | --- | --- |
 | 只接受 HTTPS | `Origin.ets` 拒绝 `http`、opaque URI、userinfo、query、fragment（除固定的配对路径外）、越界端口；不做“自动修复” |
-| 配对密钥只在片段中 | `#key=...` / `#instance=...` 不会出现在 HTTP 请求里，不会被网关日志记录 |
+| 配对密钥不进入 HTTP 请求 | URL 片段不会被浏览器/客户端发送给服务器；裸密钥只在本机内存中使用，配对成功后 token 即丢弃 |
 | `instanceId` = CA 证书指纹 | `instanceId` 是配对 CA 证书 DER 的 SHA-256（小写十六进制）。手机校验「下载到的 CA」与「链接里承诺的 CA」是同一张证书，局域网中无法被替换 |
-| 初始连接不信任任何证书 | bootstrap 请求使用 `skipRemoteValidation`，但**在读取任何响应之前**先比对服务端证书/CA 指纹；校验失败即中止，不给“先通信再验证”留窗口 |
+| 初始连接不信任任何证书 | bootstrap 请求使用 `skipRemoteValidation` 拉起 TLS，但下载到的 CA 必须先通过「SHA-256 == instanceId + 自签名 + 有效期」校验才会被信任；校验失败立即中止，之后才发送任何凭据 |
 | 固定 CA 作为唯一信任锚 | 后续请求把 CA PEM 传入 `TLSSocket` 的 `secureOptions.ca`（**替换**系统信任库而不是追加），避免系统里任意根证书签发的证书冒充网关 |
 | Web 容器 SSL 续接 | ArkWeb 报告 SSL 错误时，用固定的 CA 校验服务端证书链（`chainMatchesPinnedCa` / `chainContainsPinnedCa`），通过才允许继续加载 |
 | 凭据不进 preferences | `deviceToken` 只写 **Asset Store Kit**（`asset.add`，`DEVICE_UNLOCKED` 可访问性）；preferences 里只有展示用元数据与 CA PEM |
 | 会话令牌不落盘 | `sessionToken` / `csrfToken` 只存在于内存并注入 Cookie，重启后重新 `native-renew` |
 | 会话 Cookie 最小暴露 | host-only、`Path=/`、`Secure`、`SameSite=Strict`，会话名为 `HttpOnly`；不带 `Domain`，不会被其他主机读到 |
-| 同源校验 | 页面内跳转/下载/WebSocket 只允许已固定 origin（`https`/`wss` 同 host:port），防止配对后被导流到第三方面板 |
+| 同源校验 | 页面内跳转与 WebSocket 只允许已固定 authority（`https`/`wss` 同 host:port），防止配对后被导流到第三方面板 |
 | 严格响应校验 | 控制接口响应必须携带精确的键集合、未来时间戳（epoch 毫秒）、`deviceId` 为 32 位小写十六进制、`instanceId` 回显必须等于本地记录 |
 
 威胁模型与取舍详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
@@ -192,16 +210,15 @@ hdc install -r entry\build\default\outputs\default\entry-default-signed.hap
 ## 已知限制
 
 1. **无真机验收**：本仓库的构建只在本机编译层面通过；配对、浏览、证书续接、网络切换均**未在真机验证**。
-2. **无原生扫码**：必须复制/粘贴配对链接；`CAMERA` 权限已在 `module.json5` 声明，但扫码 UI 未实现。
-3. **无推送**：不上报 `installation-id` 之外的推送信息，后台任务不会触发系统通知。
+2. **无原生扫码**：必须复制/粘贴配对链接或裸密钥；**未申请相机权限**（`module.json5` 只声明 `INTERNET` / `GET_NETWORK_INFO`），扫码 UI 未实现。
+3. **无推送**：没有 `mobile-push` 注册，后台任务完成/需要确认时不会收到系统通知。
 4. **无 iroh**：上游 Android 的 iroh 点对点传输未移植；仅支持 HTTPS 直连入口（局域网、自签名 FRP、公网证书）。
 5. **无 `window.dshMobileNative`**：页面运行在上游的浏览器模式，依赖原生能力的增强功能不可用。
 6. **无原生文件选择器桥接**：网页内的文件上传走 ArkWeb 默认行为，未实现下载路径策略、分享与保存。
 7. **未移植外围功能**：应用内更新、后台常驻服务、画中画、草稿传输、启动缓存等 Android 侧功能。
 8. **只支持一对一网关的 HTTPS 浏览**：不代理 DSH 的其他端口，也不做本地反向代理。
 9. **签名材料需要自备**：仓库不含任何证书、Profile 或密钥。
-10. **公网证书（`dsh1`）入口的配对流程尚未打通**：`pairingKeyFromUrl` 只接受 `key=dsh2.*` 与旧版 `instance=...&token=...` 片段，完整 `dsh1` 配对 URL 会被判定为“没有有效配对密钥”。代码里已有“`ca.cer` 404 → 平台信任库”的分支，但链接解析未接入，因此公网证书入口目前无法完成配对。
-11. **删除本地记录不会主动清除 ArkWeb 会话 Cookie**：旧 Cookie 可能保留到会话过期（仍受 host-only / HTTPS / SameSite=Strict 约束，且只属于同一台电脑）；重新配对成功后会覆盖同名 Cookie。
+10. **删除本地记录不会主动清除 ArkWeb 会话 Cookie**：旧 Cookie 可能保留到会话过期（仍受 host-only / HTTPS / SameSite=Strict 约束，且只属于同一台电脑）；重新配对成功后会覆盖同名 Cookie。
 
 ## 排障
 
@@ -209,7 +226,7 @@ hdc install -r entry\build\default\outputs\default\entry-default-signed.hap
 | --- | --- | --- |
 | 粘贴链接后提示格式错误 | 链接被截断、被聊天工具改写成 `http`、端口缺失或片段丢失 | 复制完整链接，确认是 `https://.../mobile-access/pair#...`；可由电脑重新生成配对码 |
 | 提示证书/指纹不匹配 | 电脑换了配对 CA、链接来自另一台电脑、或中间人替换 | **不要**重试忽略；在电脑上重新生成配对链接后重新配对 |
-| `dsh2` 链接提示缺少 CA（404） | 入口不是自签 CA 模式（公网证书入口才会 404），或端口指向了错误的网关 | 确认电脑上插件的入口类型；公网证书入口应使用 `dsh1` 链接（当前版本尚未打通 `dsh1` 配对流程，见[已知限制](#已知限制)） |
+| `dsh2` 链接提示缺少 CA（404） | 入口不是自签 CA 模式（公网证书入口才会 404），或端口指向了错误的网关 | 确认电脑上插件的入口类型；公网证书入口用 `dsh1` 裸密钥 + 地址配对，或直接粘贴插件生成的 `#instance=...&token=...` 链接 |
 | `HTTP 401/403` | 配对码已过期/已被使用，或设备被吊销 | 在电脑上重新生成配对码；若设备列表里已无此设备，先删除本地记录再配对 |
 | `HTTP 409` | 电脑端设备数量达到上限 | 在电脑端 dsh-mobile 设备管理里删除旧设备后重试 |
 | `HTTP 429` | 触发配对/续期频率限制 | 等待一段时间再试；不要连续重试 |
@@ -228,7 +245,7 @@ hdc shell hilog -T DshMobile
 ## 目录结构
 
 ```text
-dsh-hmos-mobile/
+dsh-mobile-harmonyos/
 ├── AppScope/                       # 应用级配置（bundleName、版本、图标、应用名）
 ├── entry/
 │   ├── build-profile.json5         # entry 模块构建配置（stage 模式、release 混淆关闭）
@@ -254,11 +271,14 @@ dsh-hmos-mobile/
 ├── hvigor/                         # hvigor 版本与构建缓存配置
 ├── build-profile.json5             # 产品级构建配置（SDK 版本、bundle 信息）
 ├── oh-package.json5                # 工程依赖（无第三方依赖）
-├── scripts/                        # 构建与安装的 PowerShell 封装
+├── scripts/                        # 构建、验证与安装的 PowerShell 封装
 │   ├── build.ps1                   # 命令行构建 HAP
-│   └── install.ps1                 # 通过 hdc 安装/卸载已签名 HAP
-├── docs/                           # 构建、协议、架构、测试文档
+│   ├── install.ps1                 # 通过 hdc 安装/卸载已签名 HAP
+│   └── verify.ps1                  # 构建 + 静态校验（交付门槛，退出码 0）
+├── docs/                           # 构建、协议、架构、测试与 ADR 文档
+├── AGENTS.md                       # 仓库对 AI agent 的规则说明
 ├── README.md
+├── .gitattributes
 └── .gitignore
 ```
 
@@ -268,7 +288,7 @@ dsh-hmos-mobile/
 
 本客户端实现的是上游 `dsh-mobile` 已经文档化的**原生配对协议**：
 
-- 配对链接：`https://<host>:<port>/mobile-access/pair#<fragment>`，片段为 `key=dsh1|dsh2.<64hex>.<43char>` 或旧版 `instance=<64hex>&token=<43char>`；
+- 配对链接：`https://<host>:<port>/mobile-access/pair#<fragment>`。上游只生成 `key=dsh2.<64hex>.<43char>`（自签 CA 入口）或旧版 `instance=<64hex>&token=<43char>`（局域网 / 公网证书）；`dsh1.<64hex>.<43char>` 是 appKey 形式，作为裸密钥配合主机地址使用；
 - 网关身份：`instanceId = SHA-256(配对 CA 证书 DER)`，小写十六进制；
 - 控制接口：`GET /mobile-access/discovery`、`GET /mobile-access/ca.cer`、`GET /mobile-access/metadata`、`POST /mobile-access/auth/native-pair|native-renew|native-probe`；
 - 浏览鉴权：会话 Cookie `dsh_ma_session` / `dsh_ma_csrf` / `__Host-dsh_ma_session` / `__Host-dsh_ma_csrf`；
@@ -294,3 +314,5 @@ dsh-hmos-mobile/
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | 原生配对协议实现者规范：URL、接口、字段、Cookie、发现、错误码、常量 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 模块划分、线程与生命周期、证书固定设计、与 Android 组件对照 |
 | [docs/TESTING.md](docs/TESTING.md) | 真机手工测试计划（**尚未执行**）、缺陷报告模板 |
+| [docs/adr/](docs/adr/README.md) | 架构决策记录：TLSSocket 取舍、信任根、原生重写等已定型的决策 |
+| [AGENTS.md](AGENTS.md) | 仓库对 AI agent 的规则：可执行命令、目录地图、硬规则、提交与交付定义 |

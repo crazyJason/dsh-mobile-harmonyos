@@ -38,7 +38,7 @@
 | `bundleName` | `io.github.sayach.dshmobile.hmos` | 安装包唯一标识 |
 | 设备类型 | `phone`、`tablet`、`2in1` | `entry/src/main/module.json5` |
 
-> 用 API 26 的 SDK 编译、兼容 API 12 是可行且已在本机验证的组合。`build-profile.json5` 中的版本值不要随意改动：`compatibleSdkVersion` 决定了 `@ohos.net.http` 等 API 是否可用，而本项目为了在 API 12 上固定自签 CA，绕开了 `@ohos.net.http`（原因见 [ARCHITECTURE.md](ARCHITECTURE.md#为什么用-tlssocket-而不是-ohosnethttp)）。
+> 用 API 26 的 SDK 编译、兼容 API 12 是可行且已在本机验证的组合。`build-profile.json5` 中的版本值不要随意改动：`compatibleSdkVersion` 决定了 `@ohos.net.http` 等 API 是否可用，而本项目为了在 API 12 上固定自签 CA，绕开了 `@ohos.net.http`（原因见 [ARCHITECTURE.md](ARCHITECTURE.md#95-为什么用-tlssocket-而不是-ohosnethttp)）。
 
 ### 1.3 依赖
 
@@ -130,14 +130,24 @@ Remove-Item -Recurse -Force '.hvigor\cache'
 
 ### 3.5 仓库内辅助脚本
 
-仓库提供两个 PowerShell 脚本，内部执行的构建/安装动作与上文一致，便于固定参数：
+仓库提供三个 PowerShell 脚本：
+
+- `scripts/build.ps1`：自动探测 DevEco Studio / SDK / Node / JDK（也可用 `DEVECO_STUDIO_HOME`、`DEVECO_SDK_HOME`、`NODE_HOME`、`JAVA_HOME` 覆盖），执行与 3.1 相同的 hvigor 命令。**已在本机实际运行验证**（生成 HAP）。
+- `scripts/verify.ps1`：仓库交付门槛。先做静态校验（必需文件、配置、UTF-8/LF、签名材料、协议守卫、文档链接），再执行完整构建；**退出码 0 才算通过**。`-SkipBuild` 只跑静态校验，适合只改文档/配置时使用。
+- `scripts/install.ps1`：封装 `hdc install -r` / `hdc uninstall`，需要已签名的 HAP；安装行为未在真机验证。
 
 ```powershell
-# 构建 debug HAP（等价于 3.1，自动尝试常见 DevEco 安装路径与 JDK）
+# 构建 debug HAP（等价于 3.1）
 pwsh -File scripts\build.ps1
 
 # 构建 release HAP（未配置签名时产物仍是 unsigned）
 pwsh -File scripts\build.ps1 -Mode release
+
+# 交付前验证：构建 + 静态校验（退出码 0 才通过）
+pwsh -File scripts\verify.ps1
+
+# 快速验证：跳过构建，只跑静态校验
+pwsh -File scripts\verify.ps1 -SkipBuild
 
 # 安装已签名 HAP 到设备（自动在 DevEco SDK 中找到 hdc.exe）
 pwsh -File scripts\install.ps1 -Hap entry\build\default\outputs\default\entry-default-signed.hap
@@ -146,7 +156,7 @@ pwsh -File scripts\install.ps1 -Hap entry\build\default\outputs\default\entry-de
 pwsh -File scripts\install.ps1 -Uninstall
 ```
 
-脚本可通过 `DEVECO_STUDIO_HOME` / `DEVECO_SDK_HOME` / `NODE_HOME` / `JAVA_HOME` 覆盖自动探测的路径。`-Mode release` 只改变构建模式，**不会自动签名**。本机实际验证过的是 3.1 的显式命令；脚本是同一命令的封装，使用前建议先确认脚本输出的 DevEco/SDK/JDK 路径与本机一致。
+`-Mode release` 只改变构建模式，**不会自动签名**。脚本是 3.1 命令的封装；使用前建议先确认脚本输出的 DevEco/SDK/JDK 路径与本机一致。
 
 ---
 
@@ -304,7 +314,7 @@ D:\Programs\Huawei\DevEcoStudio\sdk\default\openharmony\toolchains\hdc.exe
 | --- | --- |
 | 验证日期 | 2026-11-24 |
 | 验证机器 | 本项目开发机（Windows，DevEco Studio 26.0.0，SDK API 26，hvigor 6.26.9，JDK 17） |
-| 执行的命令 | 3.1 节中的完整命令行（`assembleHap --no-daemon`） |
+| 执行的命令 | 3.1 节中的完整命令行（`assembleHap --no-daemon`）；同一命令也已由 `scripts/build.ps1` 封装验证 |
 | 结果 | 命令成功结束，生成 `entry/build/default/outputs/default/entry-default-unsigned.hap` |
 | 结论 | **ArkTS 源码可编译、可组装成 HAP**；产物为未签名包，不能安装 |
 | 未做 | 未在真机安装、未启动应用、未做配对/浏览/证书/网络切换验收（见 [TESTING.md](TESTING.md)） |
