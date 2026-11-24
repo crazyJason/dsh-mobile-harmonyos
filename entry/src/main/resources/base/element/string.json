@@ -1,0 +1,28 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "DeepSeek Harness mobile access client"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "DeepSeek Harness mobile access client"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "DSH Mobile"
+    },
+    {
+      "name": "reason_internet",
+      "value": "Connect to the DeepSeek Harness gateway on your computer"
+    },
+    {
+      "name": "reason_network_info",
+      "value": "Discover computers running DeepSeek Harness on the local network"
+    },
+    {
+      "name": "reason_camera",
+      "value": "Scan the pairing QR code shown by DeepSeek Harness"
+    }
+  ]
+}

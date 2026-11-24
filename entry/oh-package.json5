@@ -1,0 +1,11 @@
+{
+  "modelVersion": "5.0.0",
+  "name": "entry",
+  "version": "0.1.0",
+  "description": "DSH Mobile HarmonyOS NEXT client",
+  "main": "",
+  "author": "dsh-mobile-community",
+  "license": "Apache-2.0",
+  "dependencies": {},
+  "devDependencies": {}
+}

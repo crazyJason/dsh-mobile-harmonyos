@@ -1,0 +1,6 @@
+{
+  "modelVersion": "5.0.0",
+  "description": "DSH Mobile for HarmonyOS NEXT — native client for the DeepSeek Harness mobile access plugin",
+  "dependencies": {},
+  "devDependencies": {}
+}
